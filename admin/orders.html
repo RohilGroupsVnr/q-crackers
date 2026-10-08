@@ -1554,458 +1554,485 @@
     </script>
 
     <script type="module">
-        import { initializeApp } from "firebase/app";
-        import { getAuth, onAuthStateChanged, signOut } from "firebase/auth";
-        import {
-            getFirestore, collection, deleteDoc, doc, updateDoc,
-            onSnapshot, query, orderBy, getDocs
-        } from "firebase/firestore";
+      import { initializeApp } from "firebase/app";
+import { getAuth, onAuthStateChanged, signOut } from "firebase/auth";
+import {
+    getFirestore, collection, deleteDoc, doc, updateDoc,
+    onSnapshot, query, orderBy, getDocs, setDoc, writeBatch
+} from "firebase/firestore";
 
-        const firebaseConfig = {
-            apiKey: "AIzaSyAJo1hyj4nDX890w5dTtlFoMMa5fnY_c-0",
-            authDomain: "qcrackers.firebaseapp.com",
-            projectId: "qcrackers",
-            storageBucket: "qcrackers.firebasestorage.app",
-            messagingSenderId: "491899224672",
-            appId: "1:491899224672:web:acc45f1e3cb5f4af1bb905"
+const firebaseConfig = {
+    apiKey: "AIzaSyAJo1hyj4nDX890w5dTtlFoMMa5fnY_c-0",
+    authDomain: "qcrackers.firebaseapp.com",
+    projectId: "qcrackers",
+    storageBucket: "qcrackers.firebasestorage.app",
+    messagingSenderId: "491899224672",
+    appId: "1:491899224672:web:acc45f1e3cb5f4af1bb905"
+};
+
+// ✅ Admin login pannura email inga podunga (athey email Firebase Auth la irukkanum)
+// Empty [] vittaa -> login aana yaar venumnaalum ulla poga mudiyum (not recommended)
+const ADMIN_EMAILS = ['qcrackerss@gmail.com'];
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const $ = (id) => document.getElementById(id);
+const ordersBody = $('ordersBody');
+const loadingState = $('loadingState');
+const emptyState = $('emptyState');
+const ordersTable = $('ordersTable');
+const orderBadge = $('orderBadge');
+const productBadge = $('productBadge');
+const globalSearch = $('globalSearch');
+const syncStatusIcon = $('syncStatusIcon');
+const syncStatusText = $('syncStatusText');
+const totalOrdersEl = $('totalOrders');
+const totalEarningsEl = $('totalEarnings');
+const pendingOrdersEl = $('pendingOrders');
+const completedOrdersEl = $('completedOrders');
+const uniqueCustomersEl = $('uniqueCustomers');
+const paidOrdersEl = $('paidOrders');
+const productModal = $('productModal');
+const modalOrderId = $('modalOrderId');
+const modalBody = $('modalBody');
+const billEditModal = $('billEditModal');
+const billEditOrderId = $('billEditOrderId');
+const billTaxPercent = $('billTaxPercent');
+const billPackagePrice = $('billPackagePrice');
+const billSubtotalPreview = $('billSubtotalPreview');
+
+let allOrders = [];
+let unsubscribeOrders = null;
+let selectedOrders = new Set();
+let currentBillOrderId = null;
+let productCountCache = null;
+
+// ============================================================
+// SECURITY: escape customer text before putting into HTML
+// ============================================================
+function esc(v) {
+    return String(v ?? '').replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+}
+
+// ============================================================
+// HELPERS
+// ============================================================
+function mapProducts(arr) {
+    return arr.map(p => {
+        const qty = Number(p.qty || p.quantity || 1);
+        const price = Number(p.price || 0);
+        return {
+            name: p.name || p.productName || p.product || 'Unknown Product',
+            qty, price,
+            amount: Number(p.amount || 0) || (price * qty)
         };
+    });
+}
 
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
-
-        const $ = (id) => document.getElementById(id);
-        const ordersBody = $('ordersBody');
-        const loadingState = $('loadingState');
-        const emptyState = $('emptyState');
-        const ordersTable = $('ordersTable');
-        const orderBadge = $('orderBadge');
-        const productBadge = $('productBadge');
-        const globalSearch = $('globalSearch');
-        const syncStatusIcon = $('syncStatusIcon');
-        const syncStatusText = $('syncStatusText');
-        const totalOrdersEl = $('totalOrders');
-        const totalEarningsEl = $('totalEarnings');
-        const pendingOrdersEl = $('pendingOrders');
-        const completedOrdersEl = $('completedOrders');
-        const uniqueCustomersEl = $('uniqueCustomers');
-        const paidOrdersEl = $('paidOrders');
-        const productModal = $('productModal');
-        const modalOrderId = $('modalOrderId');
-        const modalBody = $('modalBody');
-        const billEditModal = $('billEditModal');
-        const billEditOrderId = $('billEditOrderId');
-        const billTaxPercent = $('billTaxPercent');
-        const billPackagePrice = $('billPackagePrice');
-        const billSubtotalPreview = $('billSubtotalPreview');
-
-        let allOrders = [];
-        let unsubscribeOrders = null;
-        let selectedOrders = new Set();
-        let currentBillOrderId = null;
-
-        // ============================================================
-        // HELPERS
-        // ============================================================
-        function mapProducts(arr) {
-            return arr.map(p => {
-                const qty = Number(p.qty || p.quantity || 1);
-                const price = Number(p.price || 0);
-                return {
-                    name: p.name || p.productName || p.product || 'Unknown Product',
-                    qty, price,
-                    amount: Number(p.amount || 0) || (price * qty)
-                };
-            });
+function getOrderProducts(order) {
+    let products = [];
+    for (const key of ['items', 'products', 'cartItems']) {
+        if (Array.isArray(order[key]) && order[key].length > 0) {
+            products = mapProducts(order[key]);
+            break;
         }
-
-        function getOrderProducts(order) {
-            let products = [];
-            for (const key of ['items', 'products', 'cartItems']) {
-                if (Array.isArray(order[key]) && order[key].length > 0) {
-                    products = mapProducts(order[key]);
-                    break;
-                }
-            }
-            if (products.length === 0 && (order.productName || order.product)) {
-                const qty = Number(order.productQty || order.quantity || 1);
-                const price = Number(order.productPrice || order.price || 0);
-                products.push({
-                    name: order.productName || order.product || 'Unknown Product',
-                    qty, price, amount: price * qty
-                });
-            }
-            products.forEach(p => {
-                if (!p.amount) p.amount = (p.price || 0) * (p.qty || 1);
-            });
-            return products;
-        }
-
-        function getOrderAmount(order) {
-            const fields = ['grandTotal', 'totalAmount', 'total', 'paymentAmount', 'amount', 'orderTotal'];
-            for (const f of fields) {
-                if (order[f] !== undefined && order[f] !== null && !isNaN(Number(order[f]))) {
-                    return Number(order[f]);
-                }
-            }
-            const total = getOrderProducts(order).reduce((s, p) => s + (p.amount || 0), 0);
-            return total > 0 ? total : 0;
-        }
-
-        function getOrderStatus(order) {
-            return order.orderStatus || order.shippingStatus || order.paymentStatus || 'Pending';
-        }
-
-        function generateOrderIdFallback(index) {
-            return 'QC' + String(index + 1).padStart(3, '0');
-        }
-
-        // ============================================================
-        // SORT BY ORDER ID
-        // QC156, QC154 ... (new format) sorted by number.
-        // Old format (QC-2026-xxx, random numbers) goes below, newest date first.
-        // ID_SORT_DESC = true  -> big ID first (QC156 -> QC001)
-        // ID_SORT_DESC = false -> small ID first (QC001 -> QC156)
-        // ============================================================
-        const ID_SORT_DESC = true;
-
-        function getIdNumber(order) {
-            const m = String(order.orderId || '').trim().toUpperCase().match(/^QC(\d+)$/);
-            return m ? Number(m[1]) : null;
-        }
-
-        function toTime(v) {
-            if (v && typeof v.toMillis === 'function') return v.toMillis();
-            const t = new Date(v).getTime();
-            return isNaN(t) ? 0 : t;
-        }
-
-        function sortOrdersById(list) {
-            list.sort((a, b) => {
-                const na = getIdNumber(a), nb = getIdNumber(b);
-                if (na !== null && nb !== null) {
-                    if (na !== nb) return ID_SORT_DESC ? nb - na : na - nb;
-                    return toTime(b.createdAt) - toTime(a.createdAt); // same ID (duplicates)
-                }
-                if (na !== null) return -1; // new format first
-                if (nb !== null) return 1;
-                return toTime(b.createdAt) - toTime(a.createdAt); // old format: newest first
-            });
-        }
-
-        async function getProductCount() {
-            try {
-                const snapshot = await getDocs(collection(db, 'products'));
-                return snapshot.size;
-            } catch (error) {
-                console.error('Error getting product count:', error);
-                return 0;
-            }
-        }
-
-        // ============================================================
-        // UPDATE STATUS
-        // ============================================================
-        window.updateOrderStatus = async function (orderId, newStatus) {
-            try {
-                await updateDoc(doc(db, 'orders', orderId), { orderStatus: newStatus });
-                showToast(`✅ Order status updated to: ${newStatus}`, 'success');
-            } catch (e) {
-                console.error('Error updating status:', e);
-                showToast('❌ Error updating status', 'error');
-            }
-        };
-
-        window.updatePaymentStatus = async function (orderId, newStatus) {
-            try {
-                await updateDoc(doc(db, 'orders', orderId), { paymentStatus: newStatus });
-                showToast(`✅ Payment status updated to: ${newStatus}`, 'success');
-            } catch (e) {
-                console.error('Error updating payment status:', e);
-                showToast('❌ Error updating payment status', 'error');
-            }
-        };
-
-        // ============================================================
-        // WHATSAPP STATUS
-        // ============================================================
-        window.sendStatusWhatsApp = function (orderId) {
-            const order = allOrders.find(o => o.id === orderId);
-            if (!order) { showToast('Order not found', 'error'); return; }
-
-            const row = document.querySelector(`tr[data-id="${orderId}"]`);
-            let orderStatus = order.orderStatus || 'Pending';
-            let paymentStatus = order.paymentStatus || 'Pending';
-            if (row) {
-                const s = row.querySelector('.order-status-select');
-                const p = row.querySelector('.payment-status-select');
-                if (s) orderStatus = s.value;
-                if (p) paymentStatus = p.value;
-            }
-
-            const products = getOrderProducts(order);
-            const amount = getOrderAmount(order);
-            const customerName = order.customerName || order.name || 'Customer';
-            const customerPhone = order.customerPhone || order.phone || '';
-            const orderIdDisplay = order.orderId || order.id || 'N/A';
-
-            const now = new Date();
-            const dateStr = now.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
-            const timeStr = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
-
-            const statusEmojis = { Pending: '⏳', Processing: '🔄', Shipped: '🚚', Completed: '✅', Cancelled: '❌' };
-            const orderEmoji = statusEmojis[orderStatus] || '📊';
-            const paymentEmoji = paymentStatus === 'Paid' ? '✅' : '⏳';
-            const line = `━━━━━━━━━━━━━━━━━━━━━━\n`;
-
-            let message = `🧨 *Q CRACKERS - ORDER STATUS UPDATE* 🧨\n${line}\n`;
-            message += `📋 *Order ID:* ${orderIdDisplay}\n`;
-            message += `👤 *Customer:* ${customerName}\n`;
-            message += `📞 *Phone:* ${customerPhone}\n\n`;
-            message += `📊 *Order Status:* ${orderEmoji} ${orderStatus}\n`;
-            message += `💰 *Payment Status:* ${paymentEmoji} ${paymentStatus}\n${line}\n`;
-            message += `📦 *ORDER DETAILS:*\n${line}`;
-
-            if (products.length > 0) {
-                products.forEach((p, i) => {
-                    const priceDisplay = p.price > 0 ? '₹' + p.price.toLocaleString('en-IN') : '₹0';
-                    const amountDisplay = (p.amount || p.price * p.qty || 0);
-                    message += `${i + 1}. *${p.name}*\n`;
-                    message += `   Qty: ${p.qty || 1} × ${priceDisplay} = ₹${amountDisplay.toLocaleString('en-IN')}\n`;
-                });
-            } else {
-                message += `No products found in this order.\n`;
-            }
-
-            const taxPercent = Number(order.taxPercent || 0);
-            const packagePrice = Number(order.packagePrice || 0);
-            const taxAmount = amount * taxPercent / 100;
-            const grandTotal = amount + taxAmount + packagePrice;
-
-            message += line;
-            if (taxPercent > 0) message += `➕ *Tax (${taxPercent}%):* ₹${taxAmount.toLocaleString('en-IN')}\n`;
-            if (packagePrice > 0) message += `➕ *Package Price:* ₹${packagePrice.toLocaleString('en-IN')}\n`;
-            message += `💰 *Grand Total:* ₹${grandTotal.toLocaleString('en-IN')}\n`;
-            message += `📅 *Date:* ${dateStr} at ${timeStr}\n${line}\n`;
-            message += `✅ Your order status has been updated to *${orderStatus}*.\n`;
-            message += `Thank you for ordering from *Q Crackers!* 🎆`;
-
-            if (customerPhone && customerPhone !== 'N/A') {
-                const cleanPhone = String(customerPhone).replace(/\D/g, '').slice(-10);
-                window.open(`https://wa.me/91${cleanPhone}?text=${encodeURIComponent(message)}`, '_blank');
-                showToast(`📤 Status update sent to ${customerName} via WhatsApp`, 'success');
-            } else {
-                showToast('❌ No phone number available for this order', 'error');
-            }
-        };
-
-        // ============================================================
-        // AUTH
-        // ============================================================
-        onAuthStateChanged(auth, (user) => {
-            if (!user) {
-                window.location.href = 'index.html';
-                return;
-            }
-            const userEmail = document.querySelector('.sidebar-footer .user-email');
-            const userName = document.querySelector('.sidebar-footer .user-name');
-            if (userEmail) userEmail.textContent = user.email || 'qcrackerss@gmail.com';
-            if (userName) {
-                const label = (user.email || 'Admin').split('@')[0];
-                userName.textContent = label.charAt(0).toUpperCase() + label.slice(1);
-            }
-            listenToOrders();
+    }
+    if (products.length === 0 && (order.productName || order.product)) {
+        const qty = Number(order.productQty || order.quantity || 1);
+        const price = Number(order.productPrice || order.price || 0);
+        products.push({
+            name: order.productName || order.product || 'Unknown Product',
+            qty, price, amount: price * qty
         });
+    }
+    products.forEach(p => {
+        if (!p.amount) p.amount = (p.price || 0) * (p.qty || 1);
+    });
+    return products;
+}
 
-        $('logoutBtn').addEventListener('click', () => {
-            if (confirm('Are you sure you want to logout?')) {
-                if (unsubscribeOrders) unsubscribeOrders();
-                signOut(auth);
-            }
+function getOrderAmount(order) {
+    const fields = ['grandTotal', 'totalAmount', 'total', 'paymentAmount', 'amount', 'orderTotal'];
+    for (const f of fields) {
+        if (order[f] !== undefined && order[f] !== null && !isNaN(Number(order[f]))) {
+            return Number(order[f]);
+        }
+    }
+    const total = getOrderProducts(order).reduce((s, p) => s + (p.amount || 0), 0);
+    return total > 0 ? total : 0;
+}
+
+function getOrderStatus(order) {
+    return order.orderStatus || order.shippingStatus || order.paymentStatus || 'Pending';
+}
+
+function generateOrderIdFallback(index) {
+    return 'QC' + String(index + 1).padStart(3, '0');
+}
+
+function displayId(order) {
+    return order.orderId || order.id || 'N/A';
+}
+
+// ============================================================
+// SORT BY ORDER ID
+// QC170, QC169 ... (new format) sorted by number.
+// Old format (QC-2026-xxx) goes below, newest date first.
+// ID_SORT_DESC = true  -> big ID first
+// ID_SORT_DESC = false -> small ID first
+// ============================================================
+const ID_SORT_DESC = true;
+
+function getIdNumber(order) {
+    const m = String(order.orderId || '').trim().toUpperCase().match(/^QC(\d+)$/);
+    return m ? Number(m[1]) : null;
+}
+
+function toTime(v) {
+    if (v && typeof v.toMillis === 'function') return v.toMillis();
+    const t = new Date(v).getTime();
+    return isNaN(t) ? 0 : t;
+}
+
+function sortOrdersById(list) {
+    list.sort((a, b) => {
+        const na = getIdNumber(a), nb = getIdNumber(b);
+        if (na !== null && nb !== null) {
+            if (na !== nb) return ID_SORT_DESC ? nb - na : na - nb;
+            return toTime(b.createdAt) - toTime(a.createdAt);
+        }
+        if (na !== null) return -1;
+        if (nb !== null) return 1;
+        return toTime(b.createdAt) - toTime(a.createdAt);
+    });
+}
+
+// Product count: oru thadava mattum read (reads save aagum)
+async function getProductCount() {
+    if (productCountCache !== null) return productCountCache;
+    try {
+        const snapshot = await getDocs(collection(db, 'products'));
+        productCountCache = snapshot.size;
+        return productCountCache;
+    } catch (error) {
+        console.error('Error getting product count:', error);
+        return 0;
+    }
+}
+
+// ============================================================
+// UPDATE STATUS
+// ============================================================
+window.updateOrderStatus = async function (orderId, newStatus) {
+    try {
+        await updateDoc(doc(db, 'orders', orderId), { orderStatus: newStatus });
+        showToast(`✅ Order status updated to: ${newStatus}`, 'success');
+    } catch (e) {
+        console.error('Error updating status:', e);
+        showToast('❌ Error updating status', 'error');
+    }
+};
+
+window.updatePaymentStatus = async function (orderId, newStatus) {
+    try {
+        await updateDoc(doc(db, 'orders', orderId), { paymentStatus: newStatus });
+        showToast(`✅ Payment status updated to: ${newStatus}`, 'success');
+    } catch (e) {
+        console.error('Error updating payment status:', e);
+        showToast('❌ Error updating payment status', 'error');
+    }
+};
+
+// ============================================================
+// WHATSAPP STATUS (plain text message, no HTML -> safe)
+// ============================================================
+window.sendStatusWhatsApp = function (orderId) {
+    const order = allOrders.find(o => o.id === orderId);
+    if (!order) { showToast('Order not found', 'error'); return; }
+
+    const row = document.querySelector(`tr[data-id="${orderId}"]`);
+    let orderStatus = order.orderStatus || 'Pending';
+    let paymentStatus = order.paymentStatus || 'Pending';
+    if (row) {
+        const s = row.querySelector('.order-status-select');
+        const p = row.querySelector('.payment-status-select');
+        if (s) orderStatus = s.value;
+        if (p) paymentStatus = p.value;
+    }
+
+    const products = getOrderProducts(order);
+    const amount = getOrderAmount(order);
+    const customerName = order.customerName || order.name || 'Customer';
+    const customerPhone = order.customerPhone || order.phone || '';
+    const orderIdDisplay = displayId(order);
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const timeStr = now.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    const statusEmojis = { Pending: '⏳', Processing: '🔄', Shipped: '🚚', Completed: '✅', Cancelled: '❌' };
+    const orderEmoji = statusEmojis[orderStatus] || '📊';
+    const paymentEmoji = paymentStatus === 'Paid' ? '✅' : '⏳';
+    const line = `━━━━━━━━━━━━━━━━━━━━━━\n`;
+
+    let message = `🧨 *Q CRACKERS - ORDER STATUS UPDATE* 🧨\n${line}\n`;
+    message += `📋 *Order ID:* ${orderIdDisplay}\n`;
+    message += `👤 *Customer:* ${customerName}\n`;
+    message += `📞 *Phone:* ${customerPhone}\n\n`;
+    message += `📊 *Order Status:* ${orderEmoji} ${orderStatus}\n`;
+    message += `💰 *Payment Status:* ${paymentEmoji} ${paymentStatus}\n${line}\n`;
+    message += `📦 *ORDER DETAILS:*\n${line}`;
+
+    if (products.length > 0) {
+        products.forEach((p, i) => {
+            const priceDisplay = p.price > 0 ? '₹' + p.price.toLocaleString('en-IN') : '₹0';
+            const amountDisplay = (p.amount || p.price * p.qty || 0);
+            message += `${i + 1}. *${p.name}*\n`;
+            message += `   Qty: ${p.qty || 1} × ${priceDisplay} = ₹${amountDisplay.toLocaleString('en-IN')}\n`;
         });
+    } else {
+        message += `No products found in this order.\n`;
+    }
 
-        window.showToast = function (message, type = 'info') {
-            const toast = $('toast');
-            toast.textContent = message;
-            toast.className = 'toast ' + type;
-            toast.classList.add('show');
-            clearTimeout(toast._timeout);
-            toast._timeout = setTimeout(() => toast.classList.remove('show'), 4000);
-        };
+    const taxPercent = Number(order.taxPercent || 0);
+    const packagePrice = Number(order.packagePrice || 0);
+    const taxAmount = amount * taxPercent / 100;
+    const grandTotal = amount + taxAmount + packagePrice;
 
-        // ============================================================
-        // LISTEN TO ORDERS
-        // ============================================================
-        function listenToOrders() {
-            const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
+    message += line;
+    if (taxPercent > 0) message += `➕ *Tax (${taxPercent}%):* ₹${taxAmount.toLocaleString('en-IN')}\n`;
+    if (packagePrice > 0) message += `➕ *Package Price:* ₹${packagePrice.toLocaleString('en-IN')}\n`;
+    message += `💰 *Grand Total:* ₹${grandTotal.toLocaleString('en-IN')}\n`;
+    message += `📅 *Date:* ${dateStr} at ${timeStr}\n${line}\n`;
+    message += `✅ Your order status has been updated to *${orderStatus}*.\n`;
+    message += `Thank you for ordering from *Q Crackers!* 🎆`;
 
-            loadingState.style.display = 'flex';
+    if (customerPhone && customerPhone !== 'N/A') {
+        const cleanPhone = String(customerPhone).replace(/\D/g, '').slice(-10);
+        window.open(`https://wa.me/91${cleanPhone}?text=${encodeURIComponent(message)}`, '_blank');
+        showToast(`📤 Status update sent to ${customerName} via WhatsApp`, 'success');
+    } else {
+        showToast('❌ No phone number available for this order', 'error');
+    }
+};
+
+// ============================================================
+// AUTH (only admin emails allowed)
+// ============================================================
+onAuthStateChanged(auth, (user) => {
+    const allowed = user && (ADMIN_EMAILS.length === 0 || ADMIN_EMAILS.includes(user.email));
+    if (!allowed) {
+        if (user) signOut(auth);
+        window.location.href = 'index.html';
+        return;
+    }
+    const userEmail = document.querySelector('.sidebar-footer .user-email');
+    const userName = document.querySelector('.sidebar-footer .user-name');
+    if (userEmail) userEmail.textContent = user.email || 'qcrackerss@gmail.com';
+    if (userName) {
+        const label = (user.email || 'Admin').split('@')[0];
+        userName.textContent = label.charAt(0).toUpperCase() + label.slice(1);
+    }
+    listenToOrders();
+});
+
+$('logoutBtn').addEventListener('click', () => {
+    if (confirm('Are you sure you want to logout?')) {
+        if (unsubscribeOrders) unsubscribeOrders();
+        signOut(auth);
+    }
+});
+
+window.showToast = function (message, type = 'info') {
+    const toast = $('toast');
+    toast.textContent = message;
+    toast.className = 'toast ' + type;
+    toast.classList.add('show');
+    clearTimeout(toast._timeout);
+    toast._timeout = setTimeout(() => toast.classList.remove('show'), 4000);
+};
+
+// ============================================================
+// LISTEN TO ORDERS
+// ============================================================
+function listenToOrders() {
+    const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
+
+    loadingState.style.display = 'flex';
+    ordersTable.style.display = 'none';
+    emptyState.style.display = 'none';
+
+    unsubscribeOrders = onSnapshot(q, async (snapshot) => {
+        allOrders = [];
+        snapshot.forEach((d) => allOrders.push({ id: d.id, ...d.data() }));
+        sortOrdersById(allOrders);
+
+        loadingState.style.display = 'none';
+        updateSummary(allOrders);
+
+        if (allOrders.length === 0) {
             ordersTable.style.display = 'none';
+            emptyState.style.display = 'block';
+        } else {
+            ordersTable.style.display = 'table';
             emptyState.style.display = 'none';
-
-            unsubscribeOrders = onSnapshot(q, async (snapshot) => {
-                allOrders = [];
-                snapshot.forEach((d) => allOrders.push({ id: d.id, ...d.data() }));
-                sortOrdersById(allOrders);
-
-                loadingState.style.display = 'none';
-                updateSummary(allOrders);
-
-                if (allOrders.length === 0) {
-                    ordersTable.style.display = 'none';
-                    emptyState.style.display = 'block';
-                } else {
-                    ordersTable.style.display = 'table';
-                    emptyState.style.display = 'none';
-                    applyFilters(); // keeps the search text active on live updates
-                }
-
-                const productCount = await getProductCount();
-                updateBadge(allOrders.length, productCount);
-                updateSyncStatus(true);
-            }, (error) => {
-                console.error('Error listening to orders:', error);
-                loadingState.style.display = 'none';
-                updateSyncStatus(false);
-                showToast('Error loading orders: ' + error.message, 'error');
-            });
+            applyFilters();
         }
 
-        // ============================================================
-        // SUMMARY / BADGES / SYNC
-        // ============================================================
-        function updateSummary(orders) {
-            totalOrdersEl.textContent = orders.length;
+        const productCount = await getProductCount();
+        updateBadge(allOrders.length, productCount);
+        updateSyncStatus(true);
+    }, (error) => {
+        console.error('Error listening to orders:', error);
+        loadingState.style.display = 'none';
+        updateSyncStatus(false);
+        showToast('Error loading orders: ' + error.message, 'error');
+    });
+}
 
-            const totalEarnings = orders.reduce((s, o) => s + getOrderAmount(o), 0);
-            totalEarningsEl.textContent = '₹' + totalEarnings.toLocaleString('en-IN');
+// ============================================================
+// SUMMARY / BADGES / SYNC
+// ============================================================
+function updateSummary(orders) {
+    totalOrdersEl.textContent = orders.length;
 
-            pendingOrdersEl.textContent = orders.filter(o => {
-                const s = getOrderStatus(o).toLowerCase();
-                return s !== 'completed' && s !== 'paid' && s !== 'cancelled';
-            }).length;
+    // Cancelled orders earnings la serkaathu
+    const totalEarnings = orders
+        .filter(o => (o.orderStatus || '').toLowerCase() !== 'cancelled')
+        .reduce((s, o) => s + getOrderAmount(o), 0);
+    totalEarningsEl.textContent = '₹' + totalEarnings.toLocaleString('en-IN');
 
-            completedOrdersEl.textContent = orders.filter(o => {
-                const s = getOrderStatus(o).toLowerCase();
-                return s === 'completed' || s === 'paid';
-            }).length;
+    pendingOrdersEl.textContent = orders.filter(o => {
+        const s = getOrderStatus(o).toLowerCase();
+        return s !== 'completed' && s !== 'paid' && s !== 'cancelled';
+    }).length;
 
-            paidOrdersEl.textContent = orders.filter(o => (o.paymentStatus || '').toLowerCase() === 'paid').length;
+    completedOrdersEl.textContent = orders.filter(o => {
+        const s = getOrderStatus(o).toLowerCase();
+        return s === 'completed' || s === 'paid';
+    }).length;
 
-            const customerSet = new Set();
-            orders.forEach(o => {
-                const id = o.customerEmail || o.email || o.customerPhone || o.phone || o.customerName || o.name || '';
-                if (id) customerSet.add(id);
-            });
-            uniqueCustomersEl.textContent = customerSet.size;
-        }
+    paidOrdersEl.textContent = orders.filter(o => (o.paymentStatus || '').toLowerCase() === 'paid').length;
 
-        function updateSyncStatus(isLive) {
-            if (syncStatusIcon) syncStatusIcon.className = isLive ? 'fas fa-circle live' : 'fas fa-circle offline';
-            if (syncStatusText) syncStatusText.textContent = isLive ? 'Live Sync' : 'Offline';
-        }
+    const customerSet = new Set();
+    orders.forEach(o => {
+        const id = o.customerEmail || o.email || o.customerPhone || o.phone || o.customerName || o.name || '';
+        if (id) customerSet.add(id);
+    });
+    uniqueCustomersEl.textContent = customerSet.size;
+}
 
-        function updateBadge(orderCountValue, productCountValue = 0) {
-            if (orderBadge) {
-                orderBadge.textContent = orderCountValue;
-                orderBadge.style.display = orderCountValue > 0 ? 'inline-block' : 'none';
-            }
-            if (productBadge) {
-                productBadge.textContent = productCountValue;
-                productBadge.style.display = productCountValue > 0 ? 'inline-block' : 'none';
-            }
-        }
+function updateSyncStatus(isLive) {
+    if (syncStatusIcon) syncStatusIcon.className = isLive ? 'fas fa-circle live' : 'fas fa-circle offline';
+    if (syncStatusText) syncStatusText.textContent = isLive ? 'Live Sync' : 'Offline';
+}
 
-        function updateOrderCountText(shown) {
-            const el = $('orderCount');
-            if (!el) return;
-            el.textContent = shown === allOrders.length
-                ? 'Total: ' + allOrders.length + ' orders'
-                : 'Showing ' + shown + ' of ' + allOrders.length + ' orders';
-        }
+function updateBadge(orderCountValue, productCountValue = 0) {
+    if (orderBadge) {
+        orderBadge.textContent = orderCountValue;
+        orderBadge.style.display = orderCountValue > 0 ? 'inline-block' : 'none';
+    }
+    if (productBadge) {
+        productBadge.textContent = productCountValue;
+        productBadge.style.display = productCountValue > 0 ? 'inline-block' : 'none';
+    }
+}
 
-        // ============================================================
-        // SEARCH (name / phone / email / order id / product)
-        // ============================================================
-        function getFilteredOrders() {
-            const raw = String(globalSearch.value || '').toLowerCase().trim();
-            if (!raw) return allOrders;
+function updateOrderCountText(shown) {
+    const el = $('orderCount');
+    if (!el) return;
+    el.textContent = shown === allOrders.length
+        ? 'Total: ' + allOrders.length + ' orders'
+        : 'Showing ' + shown + ' of ' + allOrders.length + ' orders';
+}
 
-            // Phone query = only digits / + / space / - / ( ) typed
-            const isPhoneQuery = /^[\d\s+\-()]+$/.test(raw);
-            let digits = raw.replace(/\D/g, '');
-            if (digits.length > 10) digits = digits.slice(-10); // ignore +91 / 91 prefix
+// ============================================================
+// SEARCH (name / phone / email / order id / product)
+// ============================================================
+function getFilteredOrders() {
+    const raw = String(globalSearch.value || '').toLowerCase().trim();
+    if (!raw) return allOrders;
 
-            return allOrders.filter((order, index) => {
-                const name = String(order.customerName || order.name || order.customer?.name || '').toLowerCase();
-                const email = String(order.customerEmail || order.email || order.customer?.email || '').toLowerCase();
-                const phoneDigits = String(order.customerPhone || order.phone || order.customer?.phone || '').replace(/\D/g, '');
-                const orderId = String(order.orderId || order.id || generateOrderIdFallback(index)).toLowerCase();
-                const products = getOrderProducts(order).map(p => p.name).join(' ').toLowerCase();
+    const isPhoneQuery = /^[\d\s+\-()]+$/.test(raw);
+    let digits = raw.replace(/\D/g, '');
+    if (digits.length > 10) digits = digits.slice(-10);
 
-                if (name.includes(raw)) return true;
-                if (email.includes(raw)) return true;
-                if (orderId.includes(raw)) return true;
-                if (products.includes(raw)) return true;
-                if (isPhoneQuery && digits && phoneDigits.includes(digits)) return true;
-                return false;
-            });
-        }
+    return allOrders.filter((order, index) => {
+        const name = String(order.customerName || order.name || order.customer?.name || '').toLowerCase();
+        const email = String(order.customerEmail || order.email || order.customer?.email || '').toLowerCase();
+        const phoneDigits = String(order.customerPhone || order.phone || order.customer?.phone || '').replace(/\D/g, '');
+        const orderId = String(order.orderId || order.id || generateOrderIdFallback(index)).toLowerCase();
+        const products = getOrderProducts(order).map(p => p.name).join(' ').toLowerCase();
 
-        function applyFilters() {
-            const list = getFilteredOrders();
-            renderOrders(list);
-            updateOrderCountText(list.length);
-            updateSelectAllState();
-        }
+        if (name.includes(raw)) return true;
+        if (email.includes(raw)) return true;
+        if (orderId.includes(raw)) return true;
+        if (products.includes(raw)) return true;
+        if (isPhoneQuery && digits && phoneDigits.includes(digits)) return true;
+        return false;
+    });
+}
 
-        window.filterOrders = applyFilters;
+function applyFilters() {
+    const list = getFilteredOrders();
+    renderOrders(list);
+    updateOrderCountText(list.length);
+    updateSelectAllState();
+}
 
-        // ============================================================
-        // RENDER ORDERS
-        // ============================================================
-        window.renderOrders = function (orders) {
-            if (!orders || orders.length === 0) {
-                ordersBody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-dim);">No matching orders found</td></tr>`;
-                return;
-            }
+window.filterOrders = applyFilters;
 
-            let html = '';
-            orders.forEach((order, i) => {
-                const slNo = i + 1;
-                const isChecked = selectedOrders.has(order.id) ? 'checked' : '';
-                const orderIdDisplay = order.orderId || order.id || 'N/A';
-                const customerName = order.customerName || order.name || 'N/A';
-                const customerEmail = order.customerEmail || order.email || 'N/A';
-                const customerPhone = order.customerPhone || order.phone || 'N/A';
-                const customerAddress = order.customerAddress || order.address || 'N/A';
-                const storeName = order.storeName || 'Q Crackers';
-                const orderDate = order.orderDate || order.createdAt || new Date().toLocaleString();
-                const productDisplay = getProductsDisplay(order);
-                const formattedAmount = '₹' + getOrderAmount(order).toLocaleString('en-IN');
-                const orderStatus = order.orderStatus || 'Pending';
-                const paymentStatus = order.paymentStatus || 'Pending';
+// ============================================================
+// RENDER ORDERS
+// ============================================================
+window.renderOrders = function (orders) {
+    if (!orders || orders.length === 0) {
+        ordersBody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-dim);">No matching orders found</td></tr>`;
+        return;
+    }
 
-                const pickupHtml = order.pickupBranchName ? `
+    let html = '';
+    orders.forEach((order, i) => {
+        const slNo = i + 1;
+        const isChecked = selectedOrders.has(order.id) ? 'checked' : '';
+        const orderIdDisplay = esc(displayId(order));
+        const customerName = esc(order.customerName || order.name || 'N/A');
+        const customerEmail = esc(order.customerEmail || order.email || 'N/A');
+        const customerPhone = esc(order.customerPhone || order.phone || 'N/A');
+        const customerAddress = esc(order.customerAddress || order.address || 'N/A');
+        const storeName = esc(order.storeName || 'Q Crackers');
+        const orderDate = esc(order.orderDate || order.createdAt || '');
+        const productDisplay = esc(getProductsDisplay(order));
+        const formattedAmount = '₹' + getOrderAmount(order).toLocaleString('en-IN');
+        const orderStatus = order.orderStatus || 'Pending';
+        const paymentStatus = order.paymentStatus || 'Pending';
+
+        const pickupHtml = order.pickupBranchName ? `
             <div class="info-row" style="flex-wrap:wrap;background:#fff8e6;padding:4px 8px;border-radius:4px;margin-top:4px;">
                 <span class="label" style="color:#cc9900;font-weight:700;">🚚 Pickup</span>
-                <span class="value" style="color:#8B0000;font-weight:600;">${order.pickupBranchName}</span>
+                <span class="value" style="color:#8B0000;font-weight:600;">${esc(order.pickupBranchName)}</span>
             </div>
             <div class="info-row" style="flex-wrap:wrap;">
                 <span class="label">Branch</span>
-                <span class="value">${order.pickupBranchAddress || 'N/A'}</span>
+                <span class="value">${esc(order.pickupBranchAddress || 'N/A')}</span>
             </div>
             ${order.pickupBranchPhone ? `
             <div class="info-row">
                 <span class="label">Ph</span>
-                <span class="value">${order.pickupBranchPhone}</span>
+                <span class="value">${esc(order.pickupBranchPhone)}</span>
             </div>` : ''}` : '';
 
-                const opt = (val, cur, label) => `<option value="${val}" ${cur === val ? 'selected' : ''}>${label || val}</option>`;
+        const opt = (val, cur, label) => `<option value="${val}" ${cur === val ? 'selected' : ''}>${label || val}</option>`;
+        const statusClass = esc(String(orderStatus).toLowerCase().replace(/[^a-z]/g, ''));
+        const paymentClass = esc(String(paymentStatus).toLowerCase().replace(/[^a-z]/g, ''));
 
-                html += `
-        <tr data-id="${order.id}">
-            <td><input type="checkbox" class="order-checkbox" data-id="${order.id}" ${isChecked} onchange="toggleOrder('${order.id}')" /></td>
+        html += `
+        <tr data-id="${esc(order.id)}">
+            <td><input type="checkbox" class="order-checkbox" ${isChecked} onchange="toggleOrder('${esc(order.id)}')" /></td>
             <td style="font-weight:600;font-size:1rem;color:var(--text-dim);">${slNo}</td>
             <td>
                 <strong style="font-size:0.95rem;color:var(--card);">${orderIdDisplay}</strong><br>
@@ -2032,7 +2059,7 @@
             <td>
                 <div style="font-size:0.85rem;">
                     <div style="font-weight:500;font-size:0.9rem;">${productDisplay}</div>
-                    <button class="product-details-btn" onclick="showProductDetails('${order.id}', '${orderIdDisplay}')">
+                    <button class="product-details-btn" onclick="showProductDetails('${esc(order.id)}')">
                         <i class="fas fa-eye"></i> View All Products
                     </button>
                 </div>
@@ -2040,54 +2067,54 @@
             <td><strong style="font-size:1rem;color:var(--card);">${formattedAmount}</strong></td>
             <td>
                 <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-start;">
-                    <span class="status-badge ${orderStatus.toLowerCase()}">${orderStatus}</span>
-                    <select class="status-select order-status-select" onchange="updateOrderStatus('${order.id}', this.value)">
+                    <span class="status-badge ${statusClass}">${esc(orderStatus)}</span>
+                    <select class="status-select order-status-select" onchange="updateOrderStatus('${esc(order.id)}', this.value)">
                         ${opt('Pending', orderStatus)}${opt('Processing', orderStatus)}${opt('Shipped', orderStatus)}${opt('Completed', orderStatus)}${opt('Cancelled', orderStatus)}
                     </select>
                 </div>
             </td>
             <td>
                 <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-start;">
-                    <span class="payment-badge ${paymentStatus.toLowerCase()}">${paymentStatus}</span>
-                    <select class="status-select payment-status-select" onchange="updatePaymentStatus('${order.id}', this.value)">
+                    <span class="payment-badge ${paymentClass}">${esc(paymentStatus)}</span>
+                    <select class="status-select payment-status-select" onchange="updatePaymentStatus('${esc(order.id)}', this.value)">
                         ${opt('Pending', paymentStatus)}${opt('Paid', paymentStatus, 'Paid ✅')}${opt('Failed', paymentStatus, 'Failed ❌')}${opt('Refunded', paymentStatus, 'Refunded 🔄')}
                     </select>
                 </div>
             </td>
             <td>
                 <div class="action-group">
-                    <button class="action-btn print-btn" onclick="printOrder('${order.id}', '${orderIdDisplay}')" title="Print Order"><i class="fas fa-print"></i> Print</button>
-                    <button class="action-btn bill-btn" onclick="openBillEditModal('${order.id}', '${orderIdDisplay}')" title="Edit Tax &amp; Package Price"><i class="fas fa-file-invoice-dollar"></i> Edit Bill</button>
-                    <button class="action-btn whatsapp-btn" onclick="sendStatusWhatsApp('${order.id}')" title="Send Full Status via WhatsApp"><i class="fab fa-whatsapp"></i> WhatsApp</button>
-                    <button class="action-btn delete" onclick="deleteOrder('${order.id}')" title="Delete Order"><i class="fas fa-trash"></i> Delete</button>
+                    <button class="action-btn print-btn" onclick="printOrder('${esc(order.id)}')" title="Print Order"><i class="fas fa-print"></i> Print</button>
+                    <button class="action-btn bill-btn" onclick="openBillEditModal('${esc(order.id)}')" title="Edit Tax &amp; Package Price"><i class="fas fa-file-invoice-dollar"></i> Edit Bill</button>
+                    <button class="action-btn whatsapp-btn" onclick="sendStatusWhatsApp('${esc(order.id)}')" title="Send Full Status via WhatsApp"><i class="fab fa-whatsapp"></i> WhatsApp</button>
+                    <button class="action-btn delete" onclick="deleteOrder('${esc(order.id)}')" title="Delete Order"><i class="fas fa-trash"></i> Delete</button>
                 </div>
             </td>
         </tr>`;
-            });
+    });
 
-            ordersBody.innerHTML = html;
-        };
+    ordersBody.innerHTML = html;
+};
 
-        function getProductsDisplay(order) {
-            const products = getOrderProducts(order);
-            if (products.length === 0) return 'No products';
-            const totalQty = products.reduce((s, p) => s + (p.qty || 1), 0);
-            if (products.length === 1) return `${products[0].name} (Qty: ${products[0].qty})`;
-            return `${products.length} items (Total Qty: ${totalQty})`;
-        }
+function getProductsDisplay(order) {
+    const products = getOrderProducts(order);
+    if (products.length === 0) return 'No products';
+    const totalQty = products.reduce((s, p) => s + (p.qty || 1), 0);
+    if (products.length === 1) return `${products[0].name} (Qty: ${products[0].qty})`;
+    return `${products.length} items (Total Qty: ${totalQty})`;
+}
 
-        // ============================================================
-        // PRODUCT DETAILS MODAL
-        // ============================================================
-        window.showProductDetails = function (orderId, orderIdDisplay) {
-            const order = allOrders.find(o => o.id === orderId);
-            if (!order) { showToast('Order not found', 'error'); return; }
+// ============================================================
+// PRODUCT DETAILS MODAL
+// ============================================================
+window.showProductDetails = function (orderId) {
+    const order = allOrders.find(o => o.id === orderId);
+    if (!order) { showToast('Order not found', 'error'); return; }
 
-            modalOrderId.textContent = 'Order #' + orderIdDisplay;
-            const products = getOrderProducts(order);
-            const amount = getOrderAmount(order);
+    modalOrderId.textContent = 'Order #' + displayId(order);
+    const products = getOrderProducts(order);
+    const amount = getOrderAmount(order);
 
-            let productsHtml = `
+    let productsHtml = `
         <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;padding:8px 0;border-bottom:2px solid var(--yellow);font-weight:600;font-size:0.85rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">
             <span>Product Name</span>
             <span style="text-align:center;">Qty</span>
@@ -2095,260 +2122,260 @@
             <span style="text-align:right;">Amount</span>
         </div>`;
 
-            if (products.length > 0) {
-                products.forEach((p, i) => {
-                    const priceDisplay = p.price > 0 ? '₹' + p.price.toLocaleString('en-IN') : '₹0';
-                    productsHtml += `
+    if (products.length > 0) {
+        products.forEach((p, i) => {
+            const priceDisplay = p.price > 0 ? '₹' + p.price.toLocaleString('en-IN') : '₹0';
+            productsHtml += `
                 <div class="product-item">
-                    <span class="pname">${i + 1}. ${p.name}</span>
+                    <span class="pname">${i + 1}. ${esc(p.name)}</span>
                     <span class="pdetails">${p.qty || 1}</span>
                     <span class="pdetails">${priceDisplay}</span>
                     <span class="pamount">₹${(p.amount || p.price * p.qty || 0).toLocaleString('en-IN')}</span>
                 </div>`;
-                });
-            } else {
-                productsHtml += `<div style="text-align:center;color:var(--text-muted);padding:20px;">No products in this order</div>`;
-            }
+        });
+    } else {
+        productsHtml += `<div style="text-align:center;color:var(--text-muted);padding:20px;">No products in this order</div>`;
+    }
 
-            const pickupBlock = order.pickupBranchName ? `
+    const pickupBlock = order.pickupBranchName ? `
         <div style="background:#fff8e6;border-left:4px solid #ffd400;padding:10px 14px;border-radius:6px;margin:12px 0;">
             <div style="font-weight:700;color:#cc9900;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">🚚 Pickup Details</div>
-            <div style="font-size:0.9rem;color:#8B0000;font-weight:600;">${order.pickupBranchName}</div>
-            <div style="font-size:0.8rem;color:#555;margin-top:2px;">${order.pickupBranchAddress || ''}</div>
-            ${order.pickupBranchPhone ? `<div style="font-size:0.8rem;color:#555;">📞 ${order.pickupBranchPhone}</div>` : ''}
+            <div style="font-size:0.9rem;color:#8B0000;font-weight:600;">${esc(order.pickupBranchName)}</div>
+            <div style="font-size:0.8rem;color:#555;margin-top:2px;">${esc(order.pickupBranchAddress || '')}</div>
+            ${order.pickupBranchPhone ? `<div style="font-size:0.8rem;color:#555;">📞 ${esc(order.pickupBranchPhone)}</div>` : ''}
             <div style="font-size:0.8rem;color:#555;">🚛 Mettur Transports</div>
         </div>` : '';
 
-            modalBody.innerHTML = `
+    modalBody.innerHTML = `
         <div style="margin-bottom:12px;color:var(--text-muted);font-size:0.9rem;">
-            <strong>Customer:</strong> ${order.customerName || order.name || 'N/A'}
-            &nbsp;|&nbsp; <strong>Phone:</strong> ${order.customerPhone || order.phone || 'N/A'}
-            &nbsp;|&nbsp; <strong>Payment:</strong> ${order.paymentStatus || 'Pending'}
+            <strong>Customer:</strong> ${esc(order.customerName || order.name || 'N/A')}
+            &nbsp;|&nbsp; <strong>Phone:</strong> ${esc(order.customerPhone || order.phone || 'N/A')}
+            &nbsp;|&nbsp; <strong>Payment:</strong> ${esc(order.paymentStatus || 'Pending')}
         </div>
         ${pickupBlock}
         ${productsHtml}
         <div class="product-total"><span>Grand Total</span><span>₹${amount.toLocaleString('en-IN')}</span></div>
         <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);display:flex;gap:12px;font-size:0.85rem;color:var(--text-muted);flex-wrap:wrap;">
-            <span><strong>Status:</strong> ${order.orderStatus || 'Pending'}</span>
-            <span><strong>Payment:</strong> ${order.paymentStatus || 'Pending'}</span>
-            <span><strong>Date:</strong> ${order.orderDate || order.createdAt || 'N/A'}</span>
+            <span><strong>Status:</strong> ${esc(order.orderStatus || 'Pending')}</span>
+            <span><strong>Payment:</strong> ${esc(order.paymentStatus || 'Pending')}</span>
+            <span><strong>Date:</strong> ${esc(order.orderDate || order.createdAt || 'N/A')}</span>
         </div>
         <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);">
-            <button class="action-btn whatsapp-btn" onclick="sendStatusWhatsApp('${order.id}')" style="width:100%;justify-content:center;padding:10px;font-size:0.9rem;border-radius:8px;">
+            <button class="action-btn whatsapp-btn" onclick="sendStatusWhatsApp('${esc(order.id)}')" style="width:100%;justify-content:center;padding:10px;font-size:0.9rem;border-radius:8px;">
                 <i class="fab fa-whatsapp"></i> Send Full Status via WhatsApp
             </button>
         </div>`;
 
-            productModal.classList.add('active');
-        };
+    productModal.classList.add('active');
+};
 
-        window.closeProductModal = function () {
-            productModal.classList.remove('active');
-        };
+window.closeProductModal = function () {
+    productModal.classList.remove('active');
+};
 
-        productModal.addEventListener('click', function (e) {
-            if (e.target === this) closeProductModal();
-        });
+productModal.addEventListener('click', function (e) {
+    if (e.target === this) closeProductModal();
+});
 
-        document.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape') {
-                closeProductModal();
-                closeBillEditModal();
-            }
-        });
+document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') {
+        closeProductModal();
+        closeBillEditModal();
+    }
+});
 
-        // ============================================================
-        // BILL EDIT MODAL
-        // ============================================================
-        window.openBillEditModal = function (orderId, orderIdDisplay) {
-            const order = allOrders.find(o => o.id === orderId);
-            if (!order) { showToast('Order not found', 'error'); return; }
+// ============================================================
+// BILL EDIT MODAL
+// ============================================================
+window.openBillEditModal = function (orderId) {
+    const order = allOrders.find(o => o.id === orderId);
+    if (!order) { showToast('Order not found', 'error'); return; }
 
-            currentBillOrderId = orderId;
-            billEditOrderId.textContent = orderIdDisplay;
-            billTaxPercent.value = order.taxPercent || 0;
-            billPackagePrice.value = order.packagePrice || 0;
+    currentBillOrderId = orderId;
+    billEditOrderId.textContent = displayId(order);
+    billTaxPercent.value = order.taxPercent || 0;
+    billPackagePrice.value = order.packagePrice || 0;
 
-            updateBillPreview();
-            billEditModal.classList.add('active');
-        };
+    updateBillPreview();
+    billEditModal.classList.add('active');
+};
 
-        window.closeBillEditModal = function () {
-            billEditModal.classList.remove('active');
-            currentBillOrderId = null;
-        };
+window.closeBillEditModal = function () {
+    billEditModal.classList.remove('active');
+    currentBillOrderId = null;
+};
 
-        function updateBillPreview() {
-            if (!currentBillOrderId) return;
-            const order = allOrders.find(o => o.id === currentBillOrderId);
-            if (!order) return;
+function updateBillPreview() {
+    if (!currentBillOrderId) return;
+    const order = allOrders.find(o => o.id === currentBillOrderId);
+    if (!order) return;
 
-            const amount = getOrderAmount(order);
-            const taxPercent = parseFloat(billTaxPercent.value) || 0;
-            const packagePrice = parseFloat(billPackagePrice.value) || 0;
-            const taxAmount = amount * taxPercent / 100;
-            const grandTotal = amount + taxAmount + packagePrice;
+    const amount = getOrderAmount(order);
+    const taxPercent = parseFloat(billTaxPercent.value) || 0;
+    const packagePrice = parseFloat(billPackagePrice.value) || 0;
+    const taxAmount = amount * taxPercent / 100;
+    const grandTotal = amount + taxAmount + packagePrice;
 
-            billSubtotalPreview.innerHTML =
-                `Amount: ₹${amount.toLocaleString('en-IN')}<br>` +
-                `Tax (${taxPercent}%): ₹${taxAmount.toLocaleString('en-IN')}<br>` +
-                `Package: ₹${packagePrice.toLocaleString('en-IN')}<br>` +
-                `<strong>Grand Total: ₹${grandTotal.toLocaleString('en-IN')}</strong>`;
-        }
+    billSubtotalPreview.innerHTML =
+        `Amount: ₹${amount.toLocaleString('en-IN')}<br>` +
+        `Tax (${taxPercent}%): ₹${taxAmount.toLocaleString('en-IN')}<br>` +
+        `Package: ₹${packagePrice.toLocaleString('en-IN')}<br>` +
+        `<strong>Grand Total: ₹${grandTotal.toLocaleString('en-IN')}</strong>`;
+}
 
-        billTaxPercent.addEventListener('input', updateBillPreview);
-        billPackagePrice.addEventListener('input', updateBillPreview);
+billTaxPercent.addEventListener('input', updateBillPreview);
+billPackagePrice.addEventListener('input', updateBillPreview);
 
-        billEditModal.addEventListener('click', function (e) {
-            if (e.target === this) closeBillEditModal();
-        });
+billEditModal.addEventListener('click', function (e) {
+    if (e.target === this) closeBillEditModal();
+});
 
-        window.saveAndPrintBill = async function () {
-            if (!currentBillOrderId) { showToast('No order selected', 'error'); return; }
-            const order = allOrders.find(o => o.id === currentBillOrderId);
-            if (!order) { showToast('Order not found', 'error'); return; }
+window.saveAndPrintBill = async function () {
+    if (!currentBillOrderId) { showToast('No order selected', 'error'); return; }
+    const order = allOrders.find(o => o.id === currentBillOrderId);
+    if (!order) { showToast('Order not found', 'error'); return; }
 
-            const taxPercent = parseFloat(billTaxPercent.value) || 0;
-            const packagePrice = parseFloat(billPackagePrice.value) || 0;
+    const taxPercent = parseFloat(billTaxPercent.value) || 0;
+    const packagePrice = parseFloat(billPackagePrice.value) || 0;
 
-            try {
-                await updateDoc(doc(db, 'orders', currentBillOrderId), { taxPercent, packagePrice });
-            } catch (e) {
-                console.error('Error saving bill details:', e);
-                showToast('❌ Error saving bill details', 'error');
-            }
+    try {
+        await updateDoc(doc(db, 'orders', currentBillOrderId), { taxPercent, packagePrice });
+    } catch (e) {
+        console.error('Error saving bill details:', e);
+        showToast('❌ Error saving bill details', 'error');
+    }
 
-            const orderIdDisplay = order.orderId || generateOrderIdFallback(allOrders.indexOf(order));
-            const localOrder = { ...order, taxPercent, packagePrice };
-            openPrintWindow(buildInvoiceHtml(localOrder, orderIdDisplay, taxPercent, packagePrice), 'Order ' + orderIdDisplay);
+    const orderIdDisplay = order.orderId || generateOrderIdFallback(allOrders.indexOf(order));
+    const localOrder = { ...order, taxPercent, packagePrice };
+    openPrintWindow(buildInvoiceHtml(localOrder, orderIdDisplay, taxPercent, packagePrice), 'Order ' + orderIdDisplay);
 
-            showToast('✅ Bill updated & sent to print', 'success');
-            closeBillEditModal();
-        };
+    showToast('✅ Bill updated & sent to print', 'success');
+    closeBillEditModal();
+};
 
-        // ============================================================
-        // SELECTION (works with the current search results)
-        // ============================================================
-        window.toggleOrder = function (orderId) {
-            if (selectedOrders.has(orderId)) selectedOrders.delete(orderId);
-            else selectedOrders.add(orderId);
-            applyFilters();
-        };
+// ============================================================
+// SELECTION (works with the current search results)
+// ============================================================
+window.toggleOrder = function (orderId) {
+    if (selectedOrders.has(orderId)) selectedOrders.delete(orderId);
+    else selectedOrders.add(orderId);
+    applyFilters();
+};
 
-        window.toggleAllOrders = function () {
-            const isChecked = $('selectAll').checked;
-            getFilteredOrders().forEach(o => isChecked ? selectedOrders.add(o.id) : selectedOrders.delete(o.id));
-            applyFilters();
-        };
+window.toggleAllOrders = function () {
+    const isChecked = $('selectAll').checked;
+    getFilteredOrders().forEach(o => isChecked ? selectedOrders.add(o.id) : selectedOrders.delete(o.id));
+    applyFilters();
+};
 
-        function updateSelectAllState() {
-            const visible = getFilteredOrders();
-            $('selectAll').checked = visible.length > 0 && visible.every(o => selectedOrders.has(o.id));
-        }
+function updateSelectAllState() {
+    const visible = getFilteredOrders();
+    $('selectAll').checked = visible.length > 0 && visible.every(o => selectedOrders.has(o.id));
+}
 
-        // ============================================================
-        // DELETE
-        // ============================================================
-        window.deleteAllOrders = async function () {
-            if (!confirm('⚠️ Are you sure you want to delete ALL orders? This cannot be undone!')) return;
-            if (!confirm('Really delete all orders from Firebase?')) return;
+// ============================================================
+// DELETE
+// ============================================================
+window.deleteAllOrders = async function () {
+    if (!confirm('⚠️ Are you sure you want to delete ALL orders? This cannot be undone!')) return;
+    if (!confirm('Really delete all orders from Firebase?')) return;
 
-            let deleted = 0;
-            for (const order of allOrders) {
-                try { await deleteDoc(doc(db, 'orders', order.id)); deleted++; }
-                catch (e) { console.error('Error deleting order:', e); }
-            }
-            selectedOrders.clear();
-            showToast(`Deleted ${deleted} orders`, 'success');
-        };
+    let deleted = 0;
+    for (const order of allOrders) {
+        try { await deleteDoc(doc(db, 'orders', order.id)); deleted++; }
+        catch (e) { console.error('Error deleting order:', e); }
+    }
+    selectedOrders.clear();
+    showToast(`Deleted ${deleted} orders`, 'success');
+};
 
-        window.deleteSelected = async function () {
-            if (selectedOrders.size === 0) {
-                showToast('Please select at least one order to delete', 'error');
-                return;
-            }
-            if (!confirm(`Delete ${selectedOrders.size} selected order(s)?`)) return;
+window.deleteSelected = async function () {
+    if (selectedOrders.size === 0) {
+        showToast('Please select at least one order to delete', 'error');
+        return;
+    }
+    if (!confirm(`Delete ${selectedOrders.size} selected order(s)?`)) return;
 
-            let deleted = 0;
-            for (const orderId of selectedOrders) {
-                try { await deleteDoc(doc(db, 'orders', orderId)); deleted++; }
-                catch (e) { console.error('Error deleting order:', e); }
-            }
-            selectedOrders.clear();
-            showToast(`Deleted ${deleted} order(s)`, 'success');
-        };
+    let deleted = 0;
+    for (const orderId of selectedOrders) {
+        try { await deleteDoc(doc(db, 'orders', orderId)); deleted++; }
+        catch (e) { console.error('Error deleting order:', e); }
+    }
+    selectedOrders.clear();
+    showToast(`Deleted ${deleted} order(s)`, 'success');
+};
 
-        window.deleteOrder = async function (orderId) {
-            if (!confirm('Delete this order?')) return;
-            try {
-                await deleteDoc(doc(db, 'orders', orderId));
-                selectedOrders.delete(orderId);
-                showToast('Order deleted successfully', 'success');
-            } catch (e) {
-                console.error('Error deleting order:', e);
-                showToast('Error deleting order', 'error');
-            }
-        };
+window.deleteOrder = async function (orderId) {
+    if (!confirm('Delete this order?')) return;
+    try {
+        await deleteDoc(doc(db, 'orders', orderId));
+        selectedOrders.delete(orderId);
+        showToast('Order deleted successfully', 'success');
+    } catch (e) {
+        console.error('Error deleting order:', e);
+        showToast('Error deleting order', 'error');
+    }
+};
 
-        // ============================================================
-        // INVOICE
-        // ============================================================
-        function buildInvoiceHtml(order, orderIdDisplay, taxPercentOverride, packagePriceOverride) {
-            const products = getOrderProducts(order);
-            const amount = getOrderAmount(order);
-            const customerName = order.customerName || order.name || 'N/A';
-            const customerPhone = order.customerPhone || order.phone || 'N/A';
-            const customerEmail = order.customerEmail || order.email || 'N/A';
-            const customerAddress = order.customerAddress || order.address || 'N/A';
-            const orderDate = order.orderDate || order.createdAt || new Date().toLocaleString();
-            const orderStatus = order.orderStatus || 'Pending';
-            const paymentStatus = order.paymentStatus || 'Pending';
+// ============================================================
+// INVOICE
+// ============================================================
+function buildInvoiceHtml(order, orderIdDisplay, taxPercentOverride, packagePriceOverride) {
+    const products = getOrderProducts(order);
+    const amount = getOrderAmount(order);
+    const customerName = esc(order.customerName || order.name || 'N/A');
+    const customerPhone = esc(order.customerPhone || order.phone || 'N/A');
+    const customerEmail = esc(order.customerEmail || order.email || 'N/A');
+    const customerAddress = esc(order.customerAddress || order.address || 'N/A');
+    const orderDate = order.orderDate || order.createdAt || new Date().toLocaleString();
+    const orderStatus = esc(order.orderStatus || 'Pending');
+    const paymentStatus = esc(order.paymentStatus || 'Pending');
 
-            const taxPercent = (taxPercentOverride !== undefined && taxPercentOverride !== null)
-                ? Number(taxPercentOverride) : Number(order.taxPercent || 0);
-            const packagePrice = (packagePriceOverride !== undefined && packagePriceOverride !== null)
-                ? Number(packagePriceOverride) : Number(order.packagePrice || 0);
-            const taxAmount = amount * taxPercent / 100;
-            const grandTotal = amount + taxAmount + packagePrice;
+    const taxPercent = (taxPercentOverride !== undefined && taxPercentOverride !== null)
+        ? Number(taxPercentOverride) : Number(order.taxPercent || 0);
+    const packagePrice = (packagePriceOverride !== undefined && packagePriceOverride !== null)
+        ? Number(packagePriceOverride) : Number(order.packagePrice || 0);
+    const taxAmount = amount * taxPercent / 100;
+    const grandTotal = amount + taxAmount + packagePrice;
 
-            let rows = '';
-            let totalQty = 0;
-            if (products.length > 0) {
-                products.forEach((p, i) => {
-                    const qty = p.qty || 1;
-                    totalQty += qty;
-                    const priceDisplay = p.price > 0 ? '₹' + p.price.toLocaleString('en-IN') : '₹0';
-                    const amountDisplay = (p.amount || p.price * qty || 0);
-                    rows += `
+    let rows = '';
+    let totalQty = 0;
+    if (products.length > 0) {
+        products.forEach((p, i) => {
+            const qty = p.qty || 1;
+            totalQty += qty;
+            const priceDisplay = p.price > 0 ? '₹' + p.price.toLocaleString('en-IN') : '₹0';
+            const amountDisplay = (p.amount || p.price * qty || 0);
+            rows += `
         <tr>
-            <td style="padding:8px 12px;border:1px solid #000;text-align:left;font-size:0.85rem;">${i + 1}. ${p.name}</td>
+            <td style="padding:8px 12px;border:1px solid #000;text-align:left;font-size:0.85rem;">${i + 1}. ${esc(p.name)}</td>
             <td style="padding:8px 12px;border:1px solid #000;text-align:center;font-size:0.85rem;">${qty}</td>
             <td style="padding:8px 12px;border:1px solid #000;text-align:right;font-size:0.85rem;">${priceDisplay}</td>
             <td style="padding:8px 12px;border:1px solid #000;text-align:right;font-size:0.85rem;font-weight:600;color:#e60000;">₹${amountDisplay.toLocaleString('en-IN')}</td>
         </tr>`;
-                });
-            } else {
-                rows = `<tr><td colspan="4" style="padding:20px;text-align:center;color:#999;border:1px solid #000;">No products in this order</td></tr>`;
-            }
+        });
+    } else {
+        rows = `<tr><td colspan="4" style="padding:20px;text-align:center;color:#999;border:1px solid #000;">No products in this order</td></tr>`;
+    }
 
-            let formattedDate = orderDate;
-            try {
-                const d = new Date(orderDate);
-                if (!isNaN(d.getTime())) {
-                    formattedDate = d.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' +
-                        d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
-                }
-            } catch (e) { }
+    let formattedDate = esc(orderDate);
+    try {
+        const d = new Date(orderDate);
+        if (!isNaN(d.getTime())) {
+            formattedDate = d.toLocaleDateString('en-IN', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' +
+                d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+        }
+    } catch (e) { }
 
-            const pickupBox = order.pickupBranchName ? `
+    const pickupBox = order.pickupBranchName ? `
         <div style="margin-top:8px;padding-top:8px;border-top:1px dashed #ddd;">
             <div style="font-weight:700;color:#cc9900;font-size:0.65rem;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">🚚 Pickup Branch</div>
-            <div style="font-size:0.85rem;color:#8B0000;font-weight:600;">${order.pickupBranchName}</div>
+            <div style="font-size:0.85rem;color:#8B0000;font-weight:600;">${esc(order.pickupBranchName)}</div>
         </div>` : '';
 
-            const th = (align, label) => `<th style="padding:10px 12px;text-align:${align};border:1px solid #000;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.5px;color:#555;">${label}</th>`;
+    const th = (align, label) => `<th style="padding:10px 12px;text-align:${align};border:1px solid #000;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.5px;color:#555;">${label}</th>`;
 
-            return `
+    return `
     <div style="page-break-after:always;padding:20px 30px;font-family:'Segoe UI',Arial,sans-serif;color:#1a0e08;background:#ffffff;">
 
         <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #e60000;padding-bottom:16px;margin-bottom:20px;">
@@ -2362,7 +2389,7 @@
             </div>
             <div style="text-align:right;">
                 <div style="font-size:1rem;font-weight:700;color:#e60000;letter-spacing:0.5px;">INVOICE</div>
-                <div style="font-size:0.85rem;font-weight:600;color:#1a0e08;">#${orderIdDisplay}</div>
+                <div style="font-size:0.85rem;font-weight:600;color:#1a0e08;">#${esc(orderIdDisplay)}</div>
                 <div style="font-size:0.7rem;color:#888;">${formattedDate}</div>
             </div>
         </div>
@@ -2422,20 +2449,20 @@
             </div>
         </div>
     </div>`;
-        }
+}
 
-        function openPrintWindow(bodyHtml, title) {
-            const printWindow = window.open('', '_blank');
-            if (!printWindow) {
-                showToast('❌ Please allow pop-ups to print', 'error');
-                return;
-            }
-            printWindow.document.write(`
+function openPrintWindow(bodyHtml, title) {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+        showToast('❌ Please allow pop-ups to print', 'error');
+        return;
+    }
+    printWindow.document.write(`
         <!DOCTYPE html>
         <html>
         <head>
             <meta charset="UTF-8">
-            <title>${title}</title>
+            <title>${esc(title)}</title>
             <style>
                 @media print { @page { margin: 12mm; } }
                 body { margin: 0; }
@@ -2452,91 +2479,105 @@
         </body>
         </html>
     `);
-            printWindow.document.close();
+    printWindow.document.close();
+}
+
+// ============================================================
+// PRINT
+// ============================================================
+window.printOrder = function (orderId) {
+    const order = allOrders.find(o => o.id === orderId);
+    if (!order) { showToast('Order not found', 'error'); return; }
+    const idText = displayId(order);
+    openPrintWindow(buildInvoiceHtml(order, idText), 'Order ' + idText);
+};
+
+// Prints what is currently shown (all orders, or the search result)
+window.printAllOrders = function () {
+    const list = getFilteredOrders();
+    if (list.length === 0) { showToast('No orders to print', 'error'); return; }
+    const html = list.map(order =>
+        buildInvoiceHtml(order, order.orderId || generateOrderIdFallback(allOrders.indexOf(order)))
+    ).join('');
+    openPrintWindow(html, 'All Orders');
+};
+
+window.printSelected = function () {
+    if (selectedOrders.size === 0) {
+        showToast('Please select at least one order to print', 'error');
+        return;
+    }
+    const selected = allOrders.filter(o => selectedOrders.has(o.id));
+    const html = selected.map(order =>
+        buildInvoiceHtml(order, order.orderId || generateOrderIdFallback(allOrders.indexOf(order)))
+    ).join('');
+    openPrintWindow(html, 'Selected Orders');
+};
+
+// ============================================================
+// SIDEBAR TOGGLE (Mobile)
+// ============================================================
+$('hamburgerBtn').addEventListener('click', () => {
+    $('sidebar').classList.toggle('open');
+    $('sidebarOverlay').classList.toggle('active');
+});
+
+$('sidebarOverlay').addEventListener('click', () => {
+    $('sidebar').classList.remove('open');
+    $('sidebarOverlay').classList.remove('active');
+});
+
+
+// ============================================================
+// ONE-TIME: ALL orders ah date padi QC001, QC002, QC003... nu renumber
+// Console la (F12) run pannunga:
+//   renumberAllOrders()       -> preview mattum (Firebase la maatham illa)
+//   renumberAllOrders(true)   -> apply (orders + counter update)
+// Mudinjadhum indha function ah delete pannidunga.
+// ============================================================
+window.renumberAllOrders = async function (apply = false) {
+    const list = [...allOrders].sort((a, b) => {
+        const ta = toTime(a.createdAt) || toTime(a.orderDate);
+        const tb = toTime(b.createdAt) || toTime(b.orderDate);
+        return ta - tb; // oldest first
+    });
+
+    const plan = list.map((o, i) => ({
+        docId: o.id,
+        customer: o.customerName || o.name || '',
+        date: o.orderDate || '',
+        from: o.orderId || o.id,
+        to: 'QC' + String(i + 1).padStart(3, '0')
+    }));
+
+    console.table(plan);
+    if (!apply) {
+        console.log(`Preview mattum. ${plan.length} orders maarum. Next order: QC${String(plan.length + 1).padStart(3, '0')}. Apply: renumberAllOrders(true)`);
+        return plan;
+    }
+
+    if (!confirm(`${plan.length} orders ku ID maathanuma? Next order QC${String(plan.length + 1).padStart(3, '0')}. Thirumba maathika mudiyaadhu. Backup eduthutteengala?`)) return;
+
+    try {
+        // Firestore batch limit 500 -> 400 la split
+        for (let i = 0; i < plan.length; i += 400) {
+            const batch = writeBatch(db);
+            plan.slice(i, i + 400).forEach(p => {
+                const o = allOrders.find(x => x.id === p.docId);
+                const data = { orderId: p.to, orderNumber: Number(p.to.slice(2)) };
+                if (o && o.orderId && o.orderId !== p.to && !o.oldOrderId) data.oldOrderId = o.orderId;
+                batch.update(doc(db, 'orders', p.docId), data);
+            });
+            await batch.commit();
         }
-
-        // ============================================================
-        // PRINT
-        // ============================================================
-        window.printOrder = function (orderId, orderIdDisplay) {
-            const order = allOrders.find(o => o.id === orderId);
-            if (!order) { showToast('Order not found', 'error'); return; }
-            openPrintWindow(buildInvoiceHtml(order, orderIdDisplay), 'Order ' + orderIdDisplay);
-        };
-
-        // Prints what is currently shown (all orders, or the search result)
-        window.printAllOrders = function () {
-            const list = getFilteredOrders();
-            if (list.length === 0) { showToast('No orders to print', 'error'); return; }
-            const html = list.map(order =>
-                buildInvoiceHtml(order, order.orderId || generateOrderIdFallback(allOrders.indexOf(order)))
-            ).join('');
-            openPrintWindow(html, 'All Orders');
-        };
-
-        window.printSelected = function () {
-            if (selectedOrders.size === 0) {
-                showToast('Please select at least one order to print', 'error');
-                return;
-            }
-            const selected = allOrders.filter(o => selectedOrders.has(o.id));
-            const html = selected.map(order =>
-                buildInvoiceHtml(order, order.orderId || generateOrderIdFallback(allOrders.indexOf(order)))
-            ).join('');
-            openPrintWindow(html, 'Selected Orders');
-        };
-
-        // ============================================================
-        // SIDEBAR TOGGLE (Mobile)
-        // ============================================================
-        $('hamburgerBtn').addEventListener('click', () => {
-            $('sidebar').classList.toggle('open');
-            $('sidebarOverlay').classList.toggle('active');
-        });
-
-        $('sidebarOverlay').addEventListener('click', () => {
-            $('sidebar').classList.remove('open');
-            $('sidebarOverlay').classList.remove('active');
-        });
-
-
-        // ============================================================
-        // ONE-TIME: renumber OLD orders (QC-2026-xxx) by date
-        // Console la run pannunga:
-        //   renumberOldOrders()       -> preview mattum
-        //   renumberOldOrders(true)   -> apply
-        // ============================================================
-        window.renumberOldOrders = async function (apply = false) {
-            const old = allOrders.filter(o => getIdNumber(o) === null);
-            old.sort((a, b) => toTime(a.createdAt) - toTime(b.createdAt)); // oldest first
-
-            const plan = old.map((o, i) => ({
-                docId: o.id,
-                customer: o.customerName || o.name || '',
-                date: o.orderDate || '',
-                from: o.orderId || o.id,
-                to: 'QC-2026-' + String(i + 1).padStart(3, '0')
-            }));
-
-            console.table(plan);
-            if (!apply) {
-                console.log(`Preview mattum. ${plan.length} orders maarum. Apply panna: renumberOldOrders(true)`);
-                return plan;
-            }
-
-            if (!confirm(`${plan.length} old orders oda Order ID maathanuma? Idhu thirumba maathika mudiyaadhu.`)) return;
-
-            let done = 0;
-            for (const p of plan) {
-                try {
-                    await updateDoc(doc(db, 'orders', p.docId), { orderId: p.to, oldOrderId: p.from });
-                    done++;
-                } catch (e) {
-                    console.error('Failed:', p, e);
-                }
-            }
-            showToast(`✅ ${done}/${plan.length} old orders renumber aagiduchu`, 'success');
-        };
+        // counter update -> next order = plan.length + 1
+        await setDoc(doc(db, 'settings', 'orderCounter'), { lastOrderNumber: plan.length }, { merge: true });
+        showToast(`✅ ${plan.length} orders renumber aagiduchu. Next: QC${String(plan.length + 1).padStart(3, '0')}`, 'success');
+    } catch (e) {
+        console.error('Renumber failed:', e);
+        showToast('❌ Renumber fail aagiduchu: ' + e.message, 'error');
+    }
+};
     </script>
 </body>
 

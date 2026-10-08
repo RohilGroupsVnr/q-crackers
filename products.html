@@ -5234,98 +5234,228 @@
             }
         }
 
-        function generateOrderPDF(orderData) {
+        // ============================================================
+        // LOGO — PDF-ku convert (professional look)
+        // ============================================================
+        let _pdfLogoCache = null;
+        function getPdfLogoDataUrl() {
+            return _pdfLogoCache || (_pdfLogoCache = new Promise(res => {
+                const im = new Image();
+                im.crossOrigin = 'anonymous';
+                im.onload = () => {
+                    try {
+                        const w = 300, h = Math.round(im.naturalHeight * w / im.naturalWidth);
+                        const cv = document.createElement('canvas');
+                        cv.width = w; cv.height = h;
+                        const cx = cv.getContext('2d');
+                        cx.fillStyle = '#fff';
+                        cx.fillRect(0, 0, w, h);
+                        cx.drawImage(im, 0, 0, w, h);
+                        res(cv.toDataURL('image/png'));
+                    } catch (e) { res(null); }
+                };
+                im.onerror = () => res(null);
+                im.src = 'images/logo-removebg-preview.png';
+            }));
+        }
+
+        async function generateOrderPDF(orderData) {
             const { jsPDF } = window.jspdf;
             const doc = new jsPDF();
 
-            // Header
-            doc.setFontSize(18);
-            doc.setTextColor(230, 0, 0);
-            doc.text("Q CRACKERS", 105, 15, { align: "center" });
-            doc.setFontSize(10);
-            doc.setTextColor(100);
-            doc.text("Wholesale Dealers - Sivakasi Fireworks", 105, 21, { align: "center" });
-            doc.setDrawColor(230, 0, 0);
-            doc.line(14, 25, 196, 25);
+            // ============================================================
+            // THEME COLORS — RED + YELLOW
+            // ============================================================
+            const RED = [230, 0, 0];            // #e60000
+            const RED_DARK = [139, 0, 0];       // #8B0000
+            const YELLOW = [255, 193, 7];       // #ffc107
+            const GREY = [100, 100, 100];
 
-            // Order Info
-            doc.setFontSize(11);
-            doc.setTextColor(0);
-            doc.text(`Order ID: ${orderData.orderId || 'N/A'}`, 14, 34);
-            doc.text(`Date: ${orderData.orderDate}`, 196, 34, { align: "right" });
-
-            // Customer Info
-            doc.setFontSize(10);
-            doc.text(`Name: ${orderData.name}`, 14, 42);
-            doc.text(`Phone: ${orderData.phone}`, 14, 48);
-            if (orderData.email) doc.text(`Email: ${orderData.email}`, 14, 54);
-            doc.text(`Address: ${orderData.address}`, 14, 60);
-            doc.text(`State: ${orderData.state}`, 14, 66);
-
-            // ---------- PICKUP BRANCH (BOX) ----------
-            let y;
-            if (orderData.pickupBranch) {
-                doc.setDrawColor(230, 0, 0);
-                doc.setFillColor(255, 245, 245);
-                doc.roundedRect(14, 70, 182, 26, 2, 2, 'FD');
-
-                doc.setFontSize(9);
-                doc.setTextColor(230, 0, 0);
-                doc.setFont(undefined, 'bold');
-                doc.text('PICKUP DETAILS', 18, 76);
-
-                doc.setTextColor(0);
-                doc.setFont(undefined, 'normal');
-                doc.setFontSize(8.5);
-                doc.text(`Branch: ${orderData.pickupBranch.name}`, 18, 82);
-                doc.text(`Address: ${orderData.pickupBranch.address}`, 18, 88);
-                if (orderData.pickupBranch.phone) {
-                    doc.text(`Phone: ${orderData.pickupBranch.phone}`, 18, 94);
-                }
-
-                y = 105;
-            } else {
-                y = 76;
+            // ============================================================
+            // LOGO (top center)
+            // ============================================================
+            const logoData = await getPdfLogoDataUrl();
+            if (logoData) {
+                try {
+                    doc.addImage(logoData, 'PNG', 88, 6, 34, 18, '', 'FAST');
+                } catch (e) { console.warn('Logo add failed:', e); }
             }
 
-            // Table Header
-            doc.setFillColor(230, 0, 0);
-            doc.setTextColor(255);
-            doc.rect(14, y - 6, 182, 8, "F");
+            // ============================================================
+            // SHOP NAME
+            // ============================================================
+            doc.setFontSize(22);
+            doc.setTextColor(...RED);
+            doc.setFont(undefined, "bold");
+            doc.text("Q CRACKERS", 105, 32, { align: "center" });
+
             doc.setFontSize(9);
+            doc.setTextColor(...GREY);
+            doc.setFont(undefined, "normal");
+            doc.text("Sivakasi Fireworks", 105, 38, { align: "center" });
+
+            doc.setFontSize(8);
+            doc.setTextColor(120);
+            doc.text("Sivakasi, Tamil Nadu  |  +91 96555 86461  |  qcrackerss@gmail.com", 105, 43, { align: "center" });
+
+            // Red divider
+            doc.setDrawColor(...RED);
+            doc.setLineWidth(1.2);
+            doc.line(14, 47, 196, 47);
+
+            // ============================================================
+            // ORDER INFO BOX — Order ID (bold, red)
+            // ============================================================
+            doc.setFillColor(255, 245, 245);
+            doc.roundedRect(14, 52, 182, 16, 2, 2, 'F');
+
+            doc.setFontSize(11);
+            doc.setTextColor(...RED_DARK);
+            doc.setFont(undefined, "bold");
+            doc.text(`Order ID: ${orderData.orderId || 'N/A'}`, 18, 60);
+
+            doc.setFont(undefined, "normal");
+            doc.setFontSize(9);
+            doc.setTextColor(...GREY);
+            doc.text(`Date: ${orderData.orderDate}`, 192, 60, { align: "right" });
+
+            // ============================================================
+            // BILL TO SECTION
+            // ============================================================
+            doc.setFontSize(10);
+            doc.setTextColor(...RED);
+            doc.setFont(undefined, "bold");
+            doc.text("BILL TO", 14, 78);
+
+            doc.setDrawColor(...YELLOW);
+            doc.setLineWidth(0.5);
+            doc.line(14, 80, 45, 80);
+
+            doc.setFontSize(9);
+            doc.setTextColor(0);
+            doc.setFont(undefined, "normal");
+            doc.text(`Name: ${orderData.name}`, 14, 86);
+            doc.text(`Phone: ${orderData.phone}`, 14, 91);
+            if (orderData.email) doc.text(`Email: ${orderData.email}`, 14, 96);
+
+            const addressLines = doc.splitTextToSize(`Address: ${orderData.address}`, 90);
+            doc.text(addressLines, 14, 101);
+            const addressBottom = 101 + (addressLines.length - 1) * 5;
+            doc.text(`State: ${orderData.state}`, 14, addressBottom + 5);
+
+            // ============================================================
+            // PICKUP DETAILS BOX (right side)
+            // ============================================================
+            let pickupBottom = addressBottom + 5;
+            if (orderData.pickupBranch) {
+                doc.setDrawColor(...RED);
+                doc.setFillColor(255, 245, 245);
+                doc.roundedRect(110, 74, 86, 34, 2, 2, 'FD');
+
+                doc.setFontSize(9);
+                doc.setTextColor(...RED);
+                doc.setFont(undefined, "bold");
+                doc.text("PICKUP DETAILS", 114, 80);
+
+                doc.setTextColor(0);
+                doc.setFont(undefined, "normal");
+                doc.setFontSize(8);
+                doc.text(`Transport: Mettur Transports`, 114, 86);
+                doc.text(`Branch: ${orderData.pickupBranch.name}`, 114, 91);
+
+                const branchAddrLines = doc.splitTextToSize(`Address: ${orderData.pickupBranch.address}`, 78);
+                doc.text(branchAddrLines, 114, 96);
+
+                if (orderData.pickupBranch.phone) {
+                    doc.text(`Phone: ${orderData.pickupBranch.phone}`, 114, 96 + branchAddrLines.length * 4 + 2);
+                }
+
+                pickupBottom = Math.max(pickupBottom, 96 + branchAddrLines.length * 4 + 8);
+            }
+
+            // ============================================================
+            // TABLE HEADER — RED background
+            // ============================================================
+            let y = Math.max(addressBottom + 12, pickupBottom + 8);
+
+            doc.setFillColor(...RED);
+            doc.rect(14, y - 6, 182, 9, "F");
+            doc.setTextColor(255);
+            doc.setFontSize(9);
+            doc.setFont(undefined, "bold");
             doc.text("S.No", 17, y);
             doc.text("Product", 32, y);
-            doc.text("Qty", 130, y);
-            doc.text("Price", 150, y);
-            doc.text("Amount", 175, y);
+            doc.text("Qty", 128, y, { align: "center" });
+            doc.text("Price", 150, y, { align: "right" });
+            doc.text("Amount", 192, y, { align: "right" });
 
-            // Table Rows
+            // ============================================================
+            // TABLE ROWS — alternating background
+            // ============================================================
             doc.setTextColor(0);
+            doc.setFont(undefined, "normal");
             y += 8;
             orderData.items.forEach((item, i) => {
-                if (y > 270) { doc.addPage(); y = 20; }
+                if (y > 265) {
+                    doc.addPage();
+                    y = 20;
+                }
                 doc.setFontSize(8.5);
                 const nameLines = doc.splitTextToSize(item.name, 90);
+
+                if (i % 2 === 0) {
+                    doc.setFillColor(255, 250, 250);
+                    doc.rect(14, y - 5, 182, Math.max(7, nameLines.length * 5 + 2), 'F');
+                }
+
                 doc.text(String(i + 1), 17, y);
                 doc.text(nameLines, 32, y);
-                doc.text(String(item.qty), 130, y);
-                doc.text(`Rs.${item.price}`, 150, y);
-                doc.text(`Rs.${item.amount}`, 175, y);
-                y += Math.max(6, nameLines.length * 5);
-                doc.setDrawColor(230);
-                doc.line(14, y - 2, 196, y - 2);
+                doc.text(String(item.qty), 128, y, { align: "center" });
+                doc.text(`${item.price}`, 150, y, { align: "right" });
+                doc.text(`${item.amount}`, 192, y, { align: "right" });
+
+                y += Math.max(7, nameLines.length * 5 + 2);
             });
 
-            // Total
-            y += 6;
+            // Table bottom border
+            doc.setDrawColor(...RED);
+            doc.setLineWidth(0.5);
+            doc.line(14, y - 2, 196, y - 2);
+
+            // ============================================================
+            // GRAND TOTAL BOX — RED
+            // ============================================================
+            y += 8;
+            doc.setFillColor(...RED);
+            doc.roundedRect(14, y - 6, 182, 14, 2, 2, "F");
+            doc.setTextColor(255);
             doc.setFontSize(11);
             doc.setFont(undefined, "bold");
-            doc.text(`Total Items: ${orderData.totalItems}`, 14, y);
-            doc.text(`Grand Total: Rs.${orderData.totalAmount.toLocaleString('en-IN')}`, 196, y, { align: "right" });
+            doc.text(`Total Items: ${orderData.totalItems}`, 18, y + 2);
+            doc.setFontSize(13);
+            doc.text(`Grand Total: Rs.${orderData.totalAmount.toLocaleString('en-IN')}`, 192, y + 2, { align: "right" });
+
+            // ============================================================
+            // FOOTER
+            // ============================================================
+            y += 22;
+            doc.setDrawColor(...YELLOW);
+            doc.setLineWidth(0.8);
+            doc.line(14, y, 196, y);
+
+            doc.setTextColor(...RED);
+            doc.setFontSize(10);
+            doc.setFont(undefined, "bold");
+            doc.text("Thank you for choosing Q Crackers!", 105, y + 8, { align: "center" });
+
+            doc.setFontSize(8);
+            doc.setFont(undefined, "normal");
+            doc.setTextColor(...GREY);
+            doc.text("Wishing you a Safe, Bright & Joyful Celebration!", 105, y + 14, { align: "center" });
+            doc.text("This is a computer-generated invoice. No signature required.", 105, y + 19, { align: "center" });
 
             return doc;
         }
-
         async function downloadBill() {
             const { cartItems, totalItems, totalAmount } = collectCartItems();
             if (totalItems === 0) { alert('Cart is empty!'); return; }
@@ -5336,8 +5466,24 @@
             const address = document.getElementById('client-address')?.value || '';
             const state = document.getElementById('client-state')?.value || 'TamilNadu & PY';
 
-            // Generate a temporary ID for the bill (does NOT save to Firebase)
-            const orderId = 'QC' + String(Date.now()).slice(-6);
+            // ============================================================
+            // ✅ SEQUENTIAL ORDER ID — Firebase counter-la irundhu
+            // (Aana counter-a increment pannaama, preview mattum)
+            // ============================================================
+            let orderId = 'QC001';
+            try {
+                const counterRef = doc(db, 'settings', 'orderCounter');
+                const counterSnap = await getDoc(counterRef);
+                const nextNumber = counterSnap.exists()
+                    ? (counterSnap.data().lastOrderNumber || 0) + 1
+                    : 1;
+                orderId = 'QC' + String(nextNumber).padStart(3, '0');
+            } catch (e) {
+                console.error('Counter error:', e);
+                // Fallback — timestamp
+                orderId = 'QC' + String(Date.now()).slice(-6);
+            }
+
             const timeStr = new Date().toLocaleString('en-IN', {
                 day: '2-digit', month: '2-digit', year: 'numeric',
                 hour: '2-digit', minute: '2-digit', hour12: true
@@ -5350,8 +5496,12 @@
                 pickupBranch: selectedPickupBranch
             };
 
-            generateOrderPDF(orderData).save(`${orderId}.pdf`);
+            // ✅ await add panniten — logo load aana appuram thaan PDF generate aagum
+            const pdf = await generateOrderPDF(orderData);
+            pdf.save(`${orderId}.pdf`);
         }
+
+
         let isPlacingOrder = false;
 
         async function sendToWhatsApp() {
@@ -5639,7 +5789,6 @@
         };
     </script>
     <script src="cart.js"></script>
-
 </body>
 
 </html>
