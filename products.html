@@ -3852,6 +3852,57 @@
             opacity: 0.5;
             pointer-events: none;
         }
+        /* ============================================================
+   CART MODAL — FORCE VISIBLE ON TOP
+   ============================================================ */
+.cart-modal {
+    display: none !important;
+    position: fixed !important;
+    inset: 0 !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    background: rgba(0, 0, 0, 0.65) !important;
+    z-index: 999999 !important;
+    justify-content: center !important;
+    align-items: center !important;
+    padding: 20px !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+}
+
+.cart-modal.active {
+    display: flex !important;
+}
+
+.cart-modal .cart-modal-content {
+    position: relative;
+    z-index: 1000000 !important;
+    background: #fff;
+    border-radius: 16px;
+    max-width: 600px;
+    width: 100%;
+    max-height: 90vh;
+    overflow: hidden;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.4);
+}
+
+/* Social float — keep BELOW cart modal */
+.social-float {
+    z-index: 100 !important;
+}
+
+/* Cart summary bar — below cart modal */
+.cart-summary-bar {
+    z-index: 50 !important;
+}
+
+/* Lightbox — highest */
+.lightbox-overlay {
+    z-index: 2000000 !important;
+}
     </style>
 
 </head>
@@ -4193,9 +4244,7 @@
                 </div>
             </div>
 
-            <p class="min-order-note" id="minOrderNote"><i class="fas fa-info-circle"></i> Minimum Order: Tamil
-                Nadu
-                &amp; PY — ₹2500 &nbsp;|&nbsp; Other States — ₹5000</p>
+         <span class="cart-modal-minorder">Min Order: <strong>₹2500</strong></span>
 
             <div id="products-container">
                 <div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i>
@@ -4390,174 +4439,178 @@
     <button id="back-to-top" class="back-to-top" aria-label="Back to top">
         <i class="fas fa-arrow-up"></i>
     </button>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-
-    <script type="importmap">
-        {
-            "imports": {
-                "firebase/app": "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js",
-                "firebase/firestore": "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js",
-                "firebase/storage": "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js"
-            }
+<script type="importmap">
+    {
+        "imports": {
+            "firebase/app": "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js",
+            "firebase/firestore": "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js",
+            "firebase/storage": "https://www.gstatic.com/firebasejs/10.13.0/firebase-storage.js"
         }
-    </script>
-    <script src="mettur-branches.js"></script>
+    }
+</script>
+<script src="mettur-branches.js"></script>
 
-    <script type="module">
-        import { initializeApp } from "firebase/app";
-        import {
-            getFirestore, collection, addDoc, getDocs, onSnapshot,
-            query, orderBy, serverTimestamp, updateDoc, doc, setDoc, getDoc, runTransaction
-        } from "firebase/firestore";
-        import { getStorage, ref, getDownloadURL, listAll } from "firebase/storage";
+<script type="module">
+    import { initializeApp } from "firebase/app";
+    import {
+        getFirestore, collection, addDoc, getDocs, onSnapshot,
+        query, orderBy, serverTimestamp, updateDoc, doc, setDoc, getDoc, runTransaction
+    } from "firebase/firestore";
+    import { getStorage, ref, getDownloadURL, listAll } from "firebase/storage";
 
-        async function markAsPaid() {
+    const firebaseConfig = {
+        apiKey: "AIzaSyAJo1hyj4nDX890w5dTtlFoMMa5fnY_c-0",
+        authDomain: "qcrackers.firebaseapp.com",
+        projectId: "qcrackers",
+        storageBucket: "qcrackers.firebasestorage.app",
+        messagingSenderId: "491899224672",
+        appId: "1:491899224672:web:acc45f1e3cb5f4af1bb905"
+    };
 
-            if (!currentOrderId) {
-                alert("Order not found");
-                return;
-            }
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const storage = getStorage(app);
 
-            await updateDoc(doc(db, "orders", currentOrderId), {
+    /* ============================================================
+       UTILITY
+       ============================================================ */
+    function escapeHtmlAttr(str) {
+        return String(str || '').replace(/[&<>"']/g, s => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[s]));
+    }
 
-                paymentStatus: "Paid"
+    /* ============================================================
+       MIN ORDER SETTINGS  (live from Firebase)
+       ============================================================ */
+    let minOrderTN = 2500;
+    let minOrderOther = 5000;
 
-            });
+    function getMinOrder() {
+        const state = document.getElementById('client-state')?.value || 'TamilNadu & PY';
+        return state === 'Other States' ? minOrderOther : minOrderTN;
+    }
 
-            const btn = document.getElementById("paidBtn");
+    function listenToMinOrderSettings() {
+        onSnapshot(doc(db, 'storeSettings', 'settings'), (snap) => {
+            if (!snap.exists()) return;
+            const data = snap.data();
+            minOrderTN = parseInt(data.minOrderTN) || 2500;
+            minOrderOther = parseInt(data.minOrderOther) || 5000;
+            updateMinOrderUI();
+        });
+    }
 
-            btn.innerHTML = "Paid ✓";
+    function updateMinOrderUI() {
+        const minOrder = getMinOrder();
 
-            btn.classList.add("success");
-
-            btn.disabled = true;
-
+        const minOrderNote = document.getElementById('minOrderNote');
+        if (minOrderNote) {
+            minOrderNote.innerHTML = `<i class="fas fa-info-circle"></i> Minimum Order: Tamil Nadu &amp; PY — ₹${minOrderTN.toLocaleString('en-IN')} &nbsp;|&nbsp; Other States — ₹${minOrderOther.toLocaleString('en-IN')}`;
         }
 
-        window.markAsPaid = markAsPaid;
-        const firebaseConfig = {
-            apiKey: "AIzaSyAJo1hyj4nDX890w5dTtlFoMMa5fnY_c-0",
-            authDomain: "qcrackers.firebaseapp.com",
-            projectId: "qcrackers",
-            storageBucket: "qcrackers.firebasestorage.app",
-            messagingSenderId: "491899224672",
-            appId: "1:491899224672:web:acc45f1e3cb5f4af1bb905"
-        };
-
-        // Initialize Firebase (ONLY ONCE)
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-        const storage = getStorage(app);
-
-        /* ============================================================
-           UTILITY
-           ============================================================ */
-        function escapeHtmlAttr(str) {
-            return String(str || '').replace(/[&<>"']/g, s => ({
-                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-            }[s]));
+        const minOrderBadge = document.getElementById('minOrderBadge');
+        if (minOrderBadge) {
+            minOrderBadge.textContent = `Min Order: ₹${minOrder.toLocaleString('en-IN')}`;
         }
 
-        /* ============================================================
-           PICKUP DETAILS — Mettur Transports
-           ============================================================ */
-        const pickupSearchInput = document.getElementById('pickup-search');
-        const pickupListEl = document.getElementById('pickup-location-list');
-        const pickupEmptyMsg = document.getElementById('pickup-empty-msg');
-        const selectedBranchInput = document.getElementById('selected-pickup-branch');
+        const cartModalMinOrder = document.querySelector('.cart-modal-minorder strong');
+        if (cartModalMinOrder) {
+            cartModalMinOrder.textContent = `₹${minOrder.toLocaleString('en-IN')}`;
+        }
 
-        const metturCheckbox = document.getElementById('mettur-transport-checkbox');
-        const metturOption = document.getElementById('provider-mettur');
+        const osMinOrder = document.getElementById('os-min-order');
+        if (osMinOrder) osMinOrder.textContent = `₹${minOrder.toLocaleString('en-IN')}`;
 
-        let selectedPickupBranch = null;
+        const osMinOrderAmount = document.getElementById('os-min-order-amount');
+        if (osMinOrderAmount) osMinOrderAmount.textContent = `₹${minOrder.toLocaleString('en-IN')}`;
 
-        /* =========================================================
-   METTUR TRANSPORT PROVIDER TOGGLE
-   ========================================================= */
+        const submitMinOrder = document.getElementById('submit-min-order');
+        if (submitMinOrder) submitMinOrder.textContent = `₹${minOrder.toLocaleString('en-IN')}`;
 
-        function updateMetturTransport() {
+        if (typeof CartManager !== 'undefined') {
+            const totalAmount = CartManager.getTotalAmount();
+            updateMinOrderWarnings(totalAmount);
+        }
+    }
 
-            if (!metturCheckbox || !metturOption) return;
+    function updateMinOrderWarnings(totalAmount) {
+        const minOrder = getMinOrder();
+        const submitBtn = document.getElementById('submit-enquiry');
+        const submitWarning = document.getElementById('submit-warning');
+        const submitWarningTotal = document.getElementById('submit-warning-total');
 
-            if (metturCheckbox.checked) {
-
-                // Provider selected
-                metturOption.classList.add('selected');
-
-                // Show pickup locations
-                if (pickupListEl) {
-                    pickupListEl.style.display = 'block';
-                }
-
-                // Render locations
-                renderPickupLocations(
-                    pickupSearchInput ? pickupSearchInput.value : ''
-                );
-
+        if (submitBtn && submitWarning) {
+            if (totalAmount > 0 && totalAmount < minOrder) {
+                submitWarning.style.display = 'flex';
+                if (submitWarningTotal) submitWarningTotal.textContent = '₹' + totalAmount.toLocaleString('en-IN');
+                submitBtn.classList.add('btn-submit-disabled');
+            } else if (totalAmount === 0) {
+                submitWarning.style.display = 'none';
+                submitBtn.classList.add('btn-submit-disabled');
             } else {
-
-                // Provider unselected
-                metturOption.classList.remove('selected');
-
-                // Hide pickup locations
-                if (pickupListEl) {
-                    pickupListEl.style.display = 'none';
-                }
-
-                // Clear selected branch
-                selectedPickupBranch = null;
-
-                if (selectedBranchInput) {
-                    selectedBranchInput.value = '';
-                }
-
-                // Remove selected location
-                if (pickupListEl) {
-                    pickupListEl
-                        .querySelectorAll('.pickup-location-card')
-                        .forEach(card => {
-                            card.classList.remove('selected');
-                        });
-                }
+                submitWarning.style.display = 'none';
+                submitBtn.classList.remove('btn-submit-disabled');
             }
         }
+    }
 
+    /* ============================================================
+       PICKUP DETAILS — Mettur Transports
+       ============================================================ */
+    const pickupSearchInput = document.getElementById('pickup-search');
+    const pickupListEl = document.getElementById('pickup-location-list');
+    const pickupEmptyMsg = document.getElementById('pickup-empty-msg');
+    const selectedBranchInput = document.getElementById('selected-pickup-branch');
+    const metturCheckbox = document.getElementById('mettur-transport-checkbox');
+    const metturOption = document.getElementById('provider-mettur');
 
-        /* Click / Unclick */
-        if (metturCheckbox) {
-            metturCheckbox.addEventListener('change', function () {
-                updateMetturTransport();
-            });
-        }
+    let selectedPickupBranch = null;
 
-
-        /* Initial state */
-        updateMetturTransport();
-
-
-        function renderPickupLocations(filterText) {
-            if (!pickupListEl) return;
-            const branches = window.METTUR_BRANCHES || [];
-            const term = (filterText || '').toLowerCase().trim();
-
-            const filtered = term
-                ? branches.filter(b =>
-                    (b.name || '').toLowerCase().includes(term) ||
-                    (b.city || '').toLowerCase().includes(term) ||
-                    (b.address || '').toLowerCase().includes(term))
-                : branches;
-
-            if (filtered.length === 0) {
-                pickupListEl.innerHTML = '';
-                if (pickupEmptyMsg) pickupEmptyMsg.style.display = 'block';
-                return;
+    function updateMetturTransport() {
+        if (!metturCheckbox || !metturOption) return;
+        if (metturCheckbox.checked) {
+            metturOption.classList.add('selected');
+            if (pickupListEl) pickupListEl.style.display = 'block';
+            renderPickupLocations(pickupSearchInput ? pickupSearchInput.value : '');
+        } else {
+            metturOption.classList.remove('selected');
+            if (pickupListEl) pickupListEl.style.display = 'none';
+            selectedPickupBranch = null;
+            if (selectedBranchInput) selectedBranchInput.value = '';
+            if (pickupListEl) {
+                pickupListEl.querySelectorAll('.pickup-location-card').forEach(card => card.classList.remove('selected'));
             }
-            if (pickupEmptyMsg) pickupEmptyMsg.style.display = 'none';
+        }
+    }
 
-            pickupListEl.innerHTML = filtered.map((branch) => {
-                const isSelected = selectedPickupBranch && selectedPickupBranch.name === branch.name;
-                return `
+    if (metturCheckbox) {
+        metturCheckbox.addEventListener('change', updateMetturTransport);
+    }
+
+    function renderPickupLocations(filterText) {
+        if (!pickupListEl) return;
+        const branches = window.METTUR_BRANCHES || [];
+        const term = (filterText || '').toLowerCase().trim();
+        const filtered = term
+            ? branches.filter(b =>
+                (b.name || '').toLowerCase().includes(term) ||
+                (b.city || '').toLowerCase().includes(term) ||
+                (b.address || '').toLowerCase().includes(term))
+            : branches;
+
+        if (filtered.length === 0) {
+            pickupListEl.innerHTML = '';
+            if (pickupEmptyMsg) pickupEmptyMsg.style.display = 'block';
+            return;
+        }
+        if (pickupEmptyMsg) pickupEmptyMsg.style.display = 'none';
+
+        pickupListEl.innerHTML = filtered.map((branch) => {
+            const isSelected = selectedPickupBranch && selectedPickupBranch.name === branch.name;
+            return `
             <div class="pickup-location-card ${isSelected ? 'selected' : ''}"
                  data-branch-name="${escapeHtmlAttr(branch.name)}"
                  role="button"
@@ -4573,1089 +4626,1114 @@
                     </div>
                 </div>
             </div>`;
-            }).join('');
+        }).join('');
+    }
+
+    function selectPickupBranch(branchName) {
+        const branches = window.METTUR_BRANCHES || [];
+        selectedPickupBranch = branches.find(b => b.name === branchName) || null;
+        if (selectedBranchInput) {
+            selectedBranchInput.value = selectedPickupBranch ? selectedPickupBranch.name : '';
         }
+        pickupListEl.querySelectorAll('.pickup-location-card').forEach(c => {
+            if (c.dataset.branchName === branchName) c.classList.add('selected');
+            else c.classList.remove('selected');
+        });
+    }
 
-        function selectPickupBranch(branchName) {
-            const branches = window.METTUR_BRANCHES || [];
-            selectedPickupBranch = branches.find(b => b.name === branchName) || null;
-            if (selectedBranchInput) {
-                selectedBranchInput.value = selectedPickupBranch ? selectedPickupBranch.name : '';
-            }
-            pickupListEl.querySelectorAll('.pickup-location-card').forEach(c => {
-                if (c.dataset.branchName === branchName) c.classList.add('selected');
-                else c.classList.remove('selected');
-            });
+    if (pickupListEl) {
+        pickupListEl.addEventListener('click', function (e) {
+            const card = e.target.closest('.pickup-location-card');
+            if (!card) return;
+            selectPickupBranch(card.dataset.branchName);
+        });
+        pickupListEl.addEventListener('keydown', function (e) {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            const card = e.target.closest('.pickup-location-card');
+            if (!card) return;
+            e.preventDefault();
+            selectPickupBranch(card.dataset.branchName);
+        });
+    }
+
+    if (pickupSearchInput) {
+        pickupSearchInput.addEventListener('input', function () {
+            renderPickupLocations(this.value);
+        });
+    }
+
+    updateMetturTransport();
+
+    /* ============================================================
+       PRODUCTS
+       ============================================================ */
+    const container = document.getElementById('products-container');
+    const loadingState = container.querySelector('.loading-spinner');
+    const noResultsMsg = document.getElementById('no-results-msg');
+    const searchInput = document.getElementById('product-search');
+    const categorySelect = document.getElementById('category-select');
+
+    let allProducts = [];
+    let storageImageMap = new Map();
+    let lastRenderedSignature = '';
+    let currentOrderId = null;
+
+    function computeProductsSignature(products) {
+        return products.map(p => [p.id, p.name, p.price, p.oldPrice, p.category, p.sub, p.imageUrl].join('|')).join('\n');
+    }
+
+    function fastLoadProducts() {
+        const cached = localStorage.getItem('cachedProducts');
+        if (cached) {
+            try {
+                const products = JSON.parse(cached);
+                if (products && products.length > 0) {
+                    renderProducts(products);
+                    loadingState.style.display = 'none';
+                    return true;
+                }
+            } catch (e) { }
         }
+        return false;
+    }
 
-        /* Card-a click pannaa — select aagum */
-        if (pickupListEl) {
-            pickupListEl.addEventListener('click', function (e) {
-                const card = e.target.closest('.pickup-location-card');
-                if (!card) return;
-                selectPickupBranch(card.dataset.branchName);
-            });
-
-            /* Keyboard-a Enter press pannaa — select aagum */
-            pickupListEl.addEventListener('keydown', function (e) {
-                if (e.key !== 'Enter' && e.key !== ' ') return;
-                const card = e.target.closest('.pickup-location-card');
-                if (!card) return;
-                e.preventDefault();
-                selectPickupBranch(card.dataset.branchName);
-            });
-        }
-
-        /* Search filter */
-        if (pickupSearchInput) {
-            pickupSearchInput.addEventListener('input', function () {
-                renderPickupLocations(this.value);
-            });
-        }
-
-        /* Initial render */
-        updateMetturTransport();
-
-        const container = document.getElementById('products-container');
-        const loadingState = container.querySelector('.loading-spinner');
-        const noResultsMsg = document.getElementById('no-results-msg');
-        const searchInput = document.getElementById('product-search');
-        const categorySelect = document.getElementById('category-select');
-
-        let allProducts = [];
-        let storageImageMap = new Map();
-        let lastRenderedSignature = '';
-        let currentOrderId = null;
-
-        function computeProductsSignature(products) {
-            return products.map(p => [p.id, p.name, p.price, p.oldPrice, p.category, p.sub, p.imageUrl].join('|')).join('\n');
-        }
-
-        function fastLoadProducts() {
-            const cached = localStorage.getItem('cachedProducts');
+    async function loadAllStorageImages() {
+        try {
+            const cached = localStorage.getItem('cachedImageMap');
             if (cached) {
                 try {
-                    const products = JSON.parse(cached);
-                    if (products && products.length > 0) {
-                        renderProducts(products);
-                        loadingState.style.display = 'none';
-                        return true;
-                    }
+                    storageImageMap = new Map(JSON.parse(cached));
+                    return true;
                 } catch (e) { }
             }
+            const listRef = ref(storage, '');
+            const res = await listAll(listRef);
+            for (const item of res.items) {
+                try {
+                    const url = await getDownloadURL(item);
+                    const name = item.name.toLowerCase();
+                    const nameWithoutExt = name.replace(/\.[^/.]+$/, '');
+                    storageImageMap.set(name, url);
+                    storageImageMap.set(nameWithoutExt, url);
+                } catch (e) { }
+            }
+            try { localStorage.setItem('cachedImageMap', JSON.stringify([...storageImageMap])); } catch (e) { }
+            return true;
+        } catch (error) {
             return false;
         }
+    }
 
-        async function loadAllStorageImages() {
-            try {
-                const cached = localStorage.getItem('cachedImageMap');
-                if (cached) {
-                    try {
-                        storageImageMap = new Map(JSON.parse(cached));
-                        return true;
-                    } catch (e) { }
-                }
-                const listRef = ref(storage, '');
-                const res = await listAll(listRef);
-                for (const item of res.items) {
-                    try {
-                        const url = await getDownloadURL(item);
-                        const name = item.name.toLowerCase();
-                        const nameWithoutExt = name.replace(/\.[^/.]+$/, '');
-                        storageImageMap.set(name, url);
-                        storageImageMap.set(nameWithoutExt, url);
-                    } catch (e) { }
-                }
-                try { localStorage.setItem('cachedImageMap', JSON.stringify([...storageImageMap])); } catch (e) { }
-                return true;
-            } catch (error) {
-                return false;
+    function findBestImageMatch(productName) {
+        if (!productName) return null;
+        const cleanName = productName.toLowerCase().replace(/["']/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+        const cleanNoSpaces = cleanName.replace(/\s/g, '');
+        const words = cleanName.split(/\s+/);
+        const exactMatches = [
+            cleanName, cleanNoSpaces,
+            cleanName.replace(/deluxe/i, '').trim(),
+            cleanName.replace(/super/i, '').trim(),
+            cleanName.replace(/special/i, '').trim(),
+            cleanName.replace(/mega/i, '').trim(),
+            cleanName.replace(/\([^)]*\)/g, '').trim(),
+        ];
+        for (const key of exactMatches) {
+            if (key && storageImageMap.has(key)) return storageImageMap.get(key);
+        }
+        for (const [key, url] of storageImageMap) {
+            for (const word of words) {
+                if (word.length > 2 && key.includes(word)) return url;
             }
         }
+        return null;
+    }
 
-        function findBestImageMatch(productName) {
-            if (!productName) return null;
-            const cleanName = productName.toLowerCase().replace(/["']/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
-            const cleanNoSpaces = cleanName.replace(/\s/g, '');
-            const words = cleanName.split(/\s+/);
-            const exactMatches = [
-                cleanName, cleanNoSpaces,
-                cleanName.replace(/deluxe/i, '').trim(),
-                cleanName.replace(/super/i, '').trim(),
-                cleanName.replace(/special/i, '').trim(),
-                cleanName.replace(/mega/i, '').trim(),
-                cleanName.replace(/\([^)]*\)/g, '').trim(),
-            ];
-            for (const key of exactMatches) {
-                if (key && storageImageMap.has(key)) return storageImageMap.get(key);
+    function refreshProductImages() {
+        document.querySelectorAll('.product-table tbody tr').forEach(function (row) {
+            const productId = row.dataset.id;
+            const product = allProducts.find(p => p.id === productId);
+            if (!product) return;
+            if (product.imageUrl && product.imageUrl.startsWith('http') && !product.imageUrl.includes('logo-removebg')) return;
+            const matched = findBestImageMatch(product.name);
+            if (matched) {
+                product.imageUrl = matched;
+                const img = row.querySelector('.product-image');
+                if (img) { img.src = matched; }
             }
-            for (const [key, url] of storageImageMap) {
-                for (const word of words) {
-                    if (word.length > 2 && key.includes(word)) return url;
-                }
-            }
-            return null;
-        }
+        });
+    }
 
-        function refreshProductImages() {
-            document.querySelectorAll('.product-table tbody tr').forEach(function (row) {
-                const productId = row.dataset.id;
-                const product = allProducts.find(p => p.id === productId);
-                if (!product) return;
-                if (product.imageUrl && product.imageUrl.startsWith('http') && !product.imageUrl.includes('logo-removebg')) return;
-                const matched = findBestImageMatch(product.name);
-                if (matched) {
-                    product.imageUrl = matched;
-                    const img = row.querySelector('.product-image');
-                    if (img) { img.src = matched; }
-                }
-            });
-        }
+    function listenToProducts() {
+        const q = query(collection(db, 'products'), orderBy('orderIndex', 'asc'));
+        fastLoadProducts();
+        if (!localStorage.getItem('cachedProducts')) loadingState.style.display = 'block';
 
-        function listenToProducts() {
-            const q = query(collection(db, 'products'), orderBy('orderIndex', 'asc'));
-            fastLoadProducts();
-            if (!localStorage.getItem('cachedProducts')) loadingState.style.display = 'block';
-
-            onSnapshot(q, async (snapshot) => {
-                if (snapshot.empty) {
-                    loadingState.style.display = 'none';
-                    container.innerHTML = `<div style="text-align:center;padding:60px 20px;color:#888;"><i class="fas fa-box-open" style="font-size:3rem;color:#ddd;margin-bottom:16px;"></i><h3 style="color:#1f1f1f;">No Products Available</h3></div>`;
-                    return;
-                }
-
-                const products = [];
-                snapshot.docs.forEach((docSnap) => {
-                    const data = docSnap.data();
-                    let imageUrl = data.imageUrl || null;
-                    if (!imageUrl || !imageUrl.startsWith('http')) {
-                        if (data.imageFilename) {
-                            const filename = data.imageFilename.toLowerCase();
-                            const nameWithoutExt = filename.replace(/\.[^/.]+$/, '');
-                            if (storageImageMap.has(filename)) imageUrl = storageImageMap.get(filename);
-                            else if (storageImageMap.has(nameWithoutExt)) imageUrl = storageImageMap.get(nameWithoutExt);
-                        }
-                    }
-                    if (!imageUrl || !imageUrl.startsWith('http')) {
-                        imageUrl = findBestImageMatch(data.name) || 'images/logo-removebg-preview.png';
-                    }
-                    products.push({ id: docSnap.id, ...data, imageUrl });
-                });
-
-                allProducts = products;
-                try { localStorage.setItem('cachedProducts', JSON.stringify(allProducts)); } catch (e) { }
-
-                const signature = computeProductsSignature(allProducts);
-                if (signature !== lastRenderedSignature) {
-                    lastRenderedSignature = signature;
-                    renderProducts(allProducts);
-                }
+        onSnapshot(q, async (snapshot) => {
+            if (snapshot.empty) {
                 loadingState.style.display = 'none';
-            }, (error) => {
-                loadingState.style.display = 'none';
-                const cached = localStorage.getItem('cachedProducts');
-                if (cached && allProducts.length === 0) {
-                    try {
-                        allProducts = JSON.parse(cached);
-                        if (allProducts.length > 0) renderProducts(allProducts);
-                    } catch (e) { }
-                }
-            });
-        }
-
-        function renderProducts(products) {
-            if (products.length === 0) {
                 container.innerHTML = `<div style="text-align:center;padding:60px 20px;color:#888;"><i class="fas fa-box-open" style="font-size:3rem;color:#ddd;margin-bottom:16px;"></i><h3 style="color:#1f1f1f;">No Products Available</h3></div>`;
                 return;
             }
 
-            const grouped = {};
-            products.forEach(p => {
-                const cat = p.category || 'Uncategorized';
-                if (!grouped[cat]) grouped[cat] = [];
-                grouped[cat].push(p);
+            const products = [];
+            snapshot.docs.forEach((docSnap) => {
+                const data = docSnap.data();
+                let imageUrl = data.imageUrl || null;
+                if (!imageUrl || !imageUrl.startsWith('http')) {
+                    if (data.imageFilename) {
+                        const filename = data.imageFilename.toLowerCase();
+                        const nameWithoutExt = filename.replace(/\.[^/.]+$/, '');
+                        if (storageImageMap.has(filename)) imageUrl = storageImageMap.get(filename);
+                        else if (storageImageMap.has(nameWithoutExt)) imageUrl = storageImageMap.get(nameWithoutExt);
+                    }
+                }
+                if (!imageUrl || !imageUrl.startsWith('http')) {
+                    imageUrl = findBestImageMatch(data.name) || 'images/logo-removebg-preview.png';
+                }
+                products.push({ id: docSnap.id, ...data, imageUrl });
             });
 
-            let html = '';
-            let globalSno = 0;
+            allProducts = products;
+            try { localStorage.setItem('cachedProducts', JSON.stringify(allProducts)); } catch (e) { }
 
-            const categoryIcons = {
-                'Sound Crackers': 'fa-bolt', 'Electric Crackers': 'fa-bolt', 'Bijili Crackers': 'fa-bolt',
-                'Flower Pots': 'fa-tree', 'Ground Chakkars': 'fa-compact-disc', 'Rainbow Chakkars': 'fa-circle',
-                'Childrens Special': 'fa-child', 'Atom Bombs': 'fa-bomb', 'Jaguvar Varities': 'fa-crown',
-                'Rocket': 'fa-rocket', 'Chotta Fancy': 'fa-star', 'New Wonders': 'fa-magic',
-                'New Attraction Fancy': 'fa-star', 'Multishots': 'fa-fire', 'Novelties': 'fa-gem',
-                'Setout': 'fa-cubes', 'Roll Caps': 'fa-bullseye', 'Sparklers': 'fa-star',
-                'New Fancy Sparklers': 'fa-star', 'Gift Boxes': 'fa-gift', 'Gift Boxes Family Package': 'fa-gift'
-            };
+            const signature = computeProductsSignature(allProducts);
+            if (signature !== lastRenderedSignature) {
+                lastRenderedSignature = signature;
+                renderProducts(allProducts);
+            }
+            loadingState.style.display = 'none';
+        }, (error) => {
+            loadingState.style.display = 'none';
+            const cached = localStorage.getItem('cachedProducts');
+            if (cached && allProducts.length === 0) {
+                try {
+                    allProducts = JSON.parse(cached);
+                    if (allProducts.length > 0) renderProducts(allProducts);
+                } catch (e) { }
+            }
+        });
+    }
 
-            for (const [cat, items] of Object.entries(grouped)) {
-                const icon = categoryIcons[cat] || 'fa-tag';
-                const catId = cat.replace(/[^a-zA-Z0-9-]/g, '-');
+    function renderProducts(products) {
+        if (products.length === 0) {
+            container.innerHTML = `<div style="text-align:center;padding:60px 20px;color:#888;"><i class="fas fa-box-open" style="font-size:3rem;color:#ddd;margin-bottom:16px;"></i><h3 style="color:#1f1f1f;">No Products Available</h3></div>`;
+            return;
+        }
 
-                html += `<div class="cat-section" id="cat-${catId}" data-cat="${cat}">
-                <div class="cat-header"><h3><i class="fas ${icon}"></i> ${cat}</h3>
-                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-                    <span class="offer-tag">${items.length} items</span>
-                    <span class="product-count-badge">${items.length} products</span>
-                </div></div>
-                <div class="table-wrap"><table class="product-table"><thead><tr>
-                    <th>#</th><th>Image</th><th>Product</th><th>Unit</th><th>MRP</th><th>Price</th><th>Qty</th><th>Amount</th>
-                </tr></thead><tbody>`;
+        const grouped = {};
+        products.forEach(p => {
+            const cat = p.category || 'Uncategorized';
+            if (!grouped[cat]) grouped[cat] = [];
+            grouped[cat].push(p);
+        });
 
-                items.forEach((product) => {
-                    globalSno++;
-                    const priority = globalSno <= 10 ? "high" : "low";
-                    const imageUrl = product.imageUrl || 'images/logo-removebg-preview.png';
-                    const price = product.price || 0;
-                    const oldPrice = product.oldPrice || price;
-                    const sub = product.sub || '1 Pkt';
+        let html = '';
+        let globalSno = 0;
 
-                    const safeName = escapeHtmlAttr(product.name);
-                    const inStock = product.inStock !== false; // field illainaa default in-stock
-                    html += `<tr data-id="${product.id}" data-name="${safeName}" data-mrp="${oldPrice}" data-price="${price}" data-unit="${sub}" data-instock="${inStock}" class="${inStock ? '' : 'out-of-stock-row'}">    <td data-label="#">${globalSno}</td>
-    <td data-label="Image">
-    <img
-        src="${imageUrl}"
-        alt="${product.name || 'Product'}"
-        class="product-image"
-        loading="lazy"
-        decoding="async"
-        fetchpriority="${priority}"
-        onclick='openLightbox("${imageUrl}", "${(product.name || "Product").replace(/"/g, "&quot;")}")'
-        onerror="this.src='images/logo-removebg-preview.png'">
-    </td>
+        const categoryIcons = {
+            'Sound Crackers': 'fa-bolt', 'Electric Crackers': 'fa-bolt', 'Bijili Crackers': 'fa-bolt',
+            'Flower Pots': 'fa-tree', 'Ground Chakkars': 'fa-compact-disc', 'Rainbow Chakkars': 'fa-circle',
+            'Childrens Special': 'fa-child', 'Atom Bombs': 'fa-bomb', 'Jaguvar Varities': 'fa-crown',
+            'Rocket': 'fa-rocket', 'Chotta Fancy': 'fa-star', 'New Wonders': 'fa-magic',
+            'New Attraction Fancy': 'fa-star', 'Multishots': 'fa-fire', 'Novelties': 'fa-gem',
+            'Setout': 'fa-cubes', 'Roll Caps': 'fa-bullseye', 'Sparklers': 'fa-star',
+            'New Fancy Sparklers': 'fa-star', 'Gift Boxes': 'fa-gift', 'Gift Boxes Family Package': 'fa-gift'
+        };
+
+        for (const [cat, items] of Object.entries(grouped)) {
+            const icon = categoryIcons[cat] || 'fa-tag';
+            const catId = cat.replace(/[^a-zA-Z0-9-]/g, '-');
+
+            html += `<div class="cat-section" id="cat-${catId}" data-cat="${cat}">
+            <div class="cat-header"><h3><i class="fas ${icon}"></i> ${cat}</h3>
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <span class="offer-tag">${items.length} items</span>
+                <span class="product-count-badge">${items.length} products</span>
+            </div></div>
+            <div class="table-wrap"><table class="product-table"><thead><tr>
+                <th>#</th><th>Image</th><th>Product</th><th>Unit</th><th>MRP</th><th>Price</th><th>Qty</th><th>Amount</th>
+            </tr></thead><tbody>`;
+
+            items.forEach((product) => {
+                globalSno++;
+                const priority = globalSno <= 10 ? "high" : "low";
+                const imageUrl = product.imageUrl || 'images/logo-removebg-preview.png';
+                const price = product.price || 0;
+                const oldPrice = product.oldPrice || price;
+                const sub = product.sub || '1 Pkt';
+
+                const safeName = escapeHtmlAttr(product.name);
+                const inStock = product.inStock !== false;
+                html += `<tr data-id="${product.id}" data-name="${safeName}" data-mrp="${oldPrice}" data-price="${price}" data-unit="${sub}" data-instock="${inStock}" class="${inStock ? '' : 'out-of-stock-row'}">    <td data-label="#">${globalSno}</td>
+<td data-label="Image">
+<img
+    src="${imageUrl}"
+    alt="${product.name || 'Product'}"
+    class="product-image"
+    loading="lazy"
+    decoding="async"
+    fetchpriority="${priority}"
+    onclick='openLightbox("${imageUrl}", "${(product.name || "Product").replace(/"/g, "&quot;")}")'
+    onerror="this.src='images/logo-removebg-preview.png'">
+</td>
 
 <td data-label="Product">
-    <span class="product-name">${product.name || 'Unnamed'}</span>
-    <span class="sub">${sub}</span>
-    ${!inStock ? '<span class="stock-badge-customer">Out of Stock</span>' : ''}
+<span class="product-name">${product.name || 'Unnamed'}</span>
+<span class="sub">${sub}</span>
+${!inStock ? '<span class="stock-badge-customer">Out of Stock</span>' : ''}
 </td>
 
-    <td data-label="Unit">${sub}</td>
-    <td data-label="MRP" class="mrp-tag">₹${oldPrice}</td>
+<td data-label="Unit">${sub}</td>
+<td data-label="MRP" class="mrp-tag">₹${oldPrice}</td>
 
-    <td data-label="Price">
-        <span class="price-cell">
-            <span class="price-tag">₹${price}</span>
-            ${oldPrice > price
-                            ? `<span class="discount-badge">${Math.round((1 - price / oldPrice) * 100)}%</span>`
-                            : ''}
-        </span>
-    </td>
+<td data-label="Price">
+    <span class="price-cell">
+        <span class="price-tag">₹${price}</span>
+        ${oldPrice > price
+                    ? `<span class="discount-badge">${Math.round((1 - price / oldPrice) * 100)}%</span>`
+                    : ''}
+    </span>
+</td>
 
 <td data-label="Qty">
-    <div class="qty-stepper ${inStock ? '' : 'disabled'}">
-        <button type="button" class="qty-btn minus" ${inStock ? '' : 'disabled'}>−</button>
-        <input type="number" class="qty-input" value="0" min="0" ${inStock ? '' : 'disabled'}>
-        <button type="button" class="qty-btn plus" ${inStock ? '' : 'disabled'}>+</button>
-    </div>
+<div class="qty-stepper ${inStock ? '' : 'disabled'}">
+    <button type="button" class="qty-btn minus" ${inStock ? '' : 'disabled'}>−</button>
+    <input type="number" class="qty-input" value="0" min="0" ${inStock ? '' : 'disabled'}>
+    <button type="button" class="qty-btn plus" ${inStock ? '' : 'disabled'}>+</button>
+</div>
 </td>
-    <td data-label="Amount" class="row-amount">₹0</td>
+<td data-label="Amount" class="row-amount">₹0</td>
 </tr>`;
-                });
+            });
 
-                html += `</tbody></table></div></div>`;
-            }
-
-            container.innerHTML = html;
-            setTimeout(initSteppers, 100);
-            setupFilters();
-
-            setTimeout(function () {
-                if (typeof CartManager !== 'undefined' && CartManager !== null) {
-                    CartManager.syncProductTable();
-                    CartManager.updateProductTable();
-                }
-            }, 300);
+            html += `</tbody></table></div></div>`;
         }
 
-        function initSteppers() { }
+        container.innerHTML = html;
+        setTimeout(initSteppers, 100);
+        setupFilters();
 
-        document.addEventListener('click', function (e) {
-            const btn = e.target.closest('.qty-btn');
-            if (!btn) return;
-            const stepper = btn.closest('.qty-stepper');
-            if (!stepper) return;
-            const input = stepper.querySelector('.qty-input');
-            const row = input.closest('tr');
-            if (!row) return;
-            if (row.dataset.instock === 'false') { input.value = 0; return; }
-
-            const name = row.dataset.name;
-            const price = parseFloat(row.dataset.price) || 0;
-            const mrp = parseFloat(row.dataset.mrp) || price;
-
-            let qty = parseInt(input.value, 10) || 0;
-            if (btn.classList.contains('plus')) qty++;
-            if (btn.classList.contains('minus') && qty > 0) qty--;
-
-            input.value = qty;
-            if (typeof CartManager !== 'undefined') {
-                CartManager.updateQuantity(name, qty, price, mrp);
+        setTimeout(function () {
+            if (typeof CartManager !== 'undefined' && CartManager !== null) {
+                CartManager.syncProductTable();
+                CartManager.updateProductTable();
             }
-            updateRowAmount(row);
-        });
+        }, 300);
+    }
 
-        document.addEventListener('change', function (e) {
-            const input = e.target.closest('.qty-input');
-            if (!input) return;
-            const row = input.closest('tr');
-            if (!row) return;
+    function initSteppers() { }
 
-            const name = row.dataset.name;
-            const price = parseFloat(row.dataset.price) || 0;
-            const mrp = parseFloat(row.dataset.mrp) || price;
+    document.addEventListener('click', function (e) {
+        const btn = e.target.closest('.qty-btn');
+        if (!btn) return;
+        const stepper = btn.closest('.qty-stepper');
+        if (!stepper) return;
+        const input = stepper.querySelector('.qty-input');
+        const row = input.closest('tr');
+        if (!row) return;
+        if (row.dataset.instock === 'false') { input.value = 0; return; }
 
-            let qty = parseInt(input.value, 10) || 0;
-            if (qty < 0) qty = 0;
-            input.value = qty;
+        const name = row.dataset.name;
+        const price = parseFloat(row.dataset.price) || 0;
+        const mrp = parseFloat(row.dataset.mrp) || price;
 
-            if (typeof CartManager !== 'undefined') {
-                CartManager.updateQuantity(name, qty, price, mrp);
-            }
-            updateRowAmount(row);
-        });
+        let qty = parseInt(input.value, 10) || 0;
+        if (btn.classList.contains('plus')) qty++;
+        if (btn.classList.contains('minus') && qty > 0) qty--;
 
-        function updateRowAmount(row) {
-            if (!row) return;
-            const qtyInput = row.querySelector('.qty-input');
-            const amountCell = row.querySelector('.row-amount');
-            if (!qtyInput || !amountCell) return;
-            const price = parseFloat(row.dataset.price) || 0;
-            const qty = parseInt(qtyInput.value, 10) || 0;
-            amountCell.textContent = qty > 0 ? '₹' + (price * qty).toLocaleString('en-IN') : '₹0';
-            if (typeof CartManager !== 'undefined') {
-                CartManager.updateBadge();
-                const itemsEl = document.getElementById('cart-items');
-                const totalEl = document.getElementById('cart-total');
-                const discountEl = document.getElementById('cart-discount');
-                if (itemsEl) itemsEl.textContent = CartManager.getTotalItems();
-                if (totalEl) totalEl.textContent = '₹' + CartManager.getTotalAmount().toLocaleString('en-IN');
-                if (discountEl) discountEl.textContent = '₹' + CartManager.getTotalDiscount().toLocaleString('en-IN');
-
-                const totalAmount = CartManager.getTotalAmount();
-                const minOrder = 2500;
-                const submitBtn = document.getElementById('submit-enquiry');
-                const submitWarning = document.getElementById('submit-warning');
-                const submitWarningTotal = document.getElementById('submit-warning-total');
-                if (submitBtn && submitWarning) {
-                    if (totalAmount > 0 && totalAmount < minOrder) {
-                        submitWarning.style.display = 'flex';
-                        if (submitWarningTotal) submitWarningTotal.textContent = '₹' + totalAmount.toLocaleString('en-IN');
-                        submitBtn.classList.add('btn-submit-disabled');
-                    } else if (totalAmount === 0) {
-                        submitWarning.style.display = 'none';
-                        submitBtn.classList.add('btn-submit-disabled');
-                    } else {
-                        submitWarning.style.display = 'none';
-                        submitBtn.classList.remove('btn-submit-disabled');
-                    }
-                }
-            }
+        input.value = qty;
+        if (typeof CartManager !== 'undefined') {
+            CartManager.updateQuantity(name, qty, price, mrp);
         }
+        updateRowAmount(row);
+    });
 
-        function collectCartItems() {
-            if (typeof CartManager === 'undefined') {
-                return { cartItems: [], totalItems: 0, totalAmount: 0, totalDiscount: 0 };
-            }
-            const cartItems = CartManager.getCartItems();
-            const totalItems = CartManager.getTotalItems();
+    document.addEventListener('change', function (e) {
+        const input = e.target.closest('.qty-input');
+        if (!input) return;
+        const row = input.closest('tr');
+        if (!row) return;
+
+        const name = row.dataset.name;
+        const price = parseFloat(row.dataset.price) || 0;
+        const mrp = parseFloat(row.dataset.mrp) || price;
+
+        let qty = parseInt(input.value, 10) || 0;
+        if (qty < 0) qty = 0;
+        input.value = qty;
+
+        if (typeof CartManager !== 'undefined') {
+            CartManager.updateQuantity(name, qty, price, mrp);
+        }
+        updateRowAmount(row);
+    });
+
+    function updateRowAmount(row) {
+        if (!row) return;
+        const qtyInput = row.querySelector('.qty-input');
+        const amountCell = row.querySelector('.row-amount');
+        if (!qtyInput || !amountCell) return;
+        const price = parseFloat(row.dataset.price) || 0;
+        const qty = parseInt(qtyInput.value, 10) || 0;
+        amountCell.textContent = qty > 0 ? '₹' + (price * qty).toLocaleString('en-IN') : '₹0';
+        if (typeof CartManager !== 'undefined') {
+            CartManager.updateBadge();
+            const itemsEl = document.getElementById('cart-items');
+            const totalEl = document.getElementById('cart-total');
+            const discountEl = document.getElementById('cart-discount');
+            if (itemsEl) itemsEl.textContent = CartManager.getTotalItems();
+            if (totalEl) totalEl.textContent = '₹' + CartManager.getTotalAmount().toLocaleString('en-IN');
+            if (discountEl) discountEl.textContent = '₹' + CartManager.getTotalDiscount().toLocaleString('en-IN');
+
             const totalAmount = CartManager.getTotalAmount();
-            const totalDiscount = CartManager.getTotalDiscount();
-            return { cartItems, totalItems, totalAmount, totalDiscount };
+            const minOrder = getMinOrder();
+            const submitBtn = document.getElementById('submit-enquiry');
+            const submitWarning = document.getElementById('submit-warning');
+            const submitWarningTotal = document.getElementById('submit-warning-total');
+            if (submitBtn && submitWarning) {
+                if (totalAmount > 0 && totalAmount < minOrder) {
+                    submitWarning.style.display = 'flex';
+                    if (submitWarningTotal) submitWarningTotal.textContent = '₹' + totalAmount.toLocaleString('en-IN');
+                    submitBtn.classList.add('btn-submit-disabled');
+                } else if (totalAmount === 0) {
+                    submitWarning.style.display = 'none';
+                    submitBtn.classList.add('btn-submit-disabled');
+                } else {
+                    submitWarning.style.display = 'none';
+                    submitBtn.classList.remove('btn-submit-disabled');
+                }
+            }
+        }
+    }
+
+    function collectCartItems() {
+        if (typeof CartManager === 'undefined') {
+            return { cartItems: [], totalItems: 0, totalAmount: 0, totalDiscount: 0 };
+        }
+        const cartItems = CartManager.getCartItems();
+        const totalItems = CartManager.getTotalItems();
+        const totalAmount = CartManager.getTotalAmount();
+        const totalDiscount = CartManager.getTotalDiscount();
+        return { cartItems, totalItems, totalAmount, totalDiscount };
+    }
+
+    function renderCartModal() {
+        const { cartItems, totalItems, totalAmount, totalDiscount } = collectCartItems();
+        const minOrder = getMinOrder();
+
+        const emptyMsg = document.getElementById('cart-empty-msg');
+        const table = document.getElementById('cart-modal-table');
+        const tbody = document.getElementById('cart-modal-tbody');
+        const countEl = document.getElementById('cart-modal-count');
+        const totalProductsEl = document.getElementById('cart-modal-total-products');
+        const discountEl = document.getElementById('cart-modal-discount');
+        const overallTotalEl = document.getElementById('cart-modal-overall-total');
+        const warningEl = document.getElementById('cart-min-order-warning');
+        const warningTotalEl = document.getElementById('cart-warning-total');
+
+        if (countEl) countEl.textContent = totalItems;
+        if (totalProductsEl) totalProductsEl.textContent = totalItems;
+        if (discountEl) discountEl.textContent = '₹' + totalDiscount.toLocaleString('en-IN');
+        if (overallTotalEl) overallTotalEl.textContent = '₹' + totalAmount.toLocaleString('en-IN');
+
+        if (cartItems.length === 0) {
+            if (emptyMsg) emptyMsg.style.display = 'block';
+            if (table) table.style.display = 'none';
+            if (warningEl) warningEl.style.display = 'none';
+            return;
         }
 
-        function renderCartModal() {
-            const { cartItems, totalItems, totalAmount, totalDiscount } = collectCartItems();
-            const minOrder = 2500;
+        if (emptyMsg) emptyMsg.style.display = 'none';
+        if (table) table.style.display = 'table';
 
-            const emptyMsg = document.getElementById('cart-empty-msg');
-            const table = document.getElementById('cart-modal-table');
-            const tbody = document.getElementById('cart-modal-tbody');
-            const countEl = document.getElementById('cart-modal-count');
-            const totalProductsEl = document.getElementById('cart-modal-total-products');
-            const discountEl = document.getElementById('cart-modal-discount');
-            const overallTotalEl = document.getElementById('cart-modal-overall-total');
-            const warningEl = document.getElementById('cart-min-order-warning');
-            const warningTotalEl = document.getElementById('cart-warning-total');
-
-            if (countEl) countEl.textContent = totalItems;
-            if (totalProductsEl) totalProductsEl.textContent = totalItems;
-            if (discountEl) discountEl.textContent = '₹' + totalDiscount.toLocaleString('en-IN');
-            if (overallTotalEl) overallTotalEl.textContent = '₹' + totalAmount.toLocaleString('en-IN');
-
-            if (cartItems.length === 0) {
-                if (emptyMsg) emptyMsg.style.display = 'block';
-                if (table) table.style.display = 'none';
-                if (warningEl) warningEl.style.display = 'none';
-                return;
-            }
-
-            if (emptyMsg) emptyMsg.style.display = 'none';
-            if (table) table.style.display = 'table';
-
-            if (tbody) {
-                tbody.innerHTML = cartItems.map((item) => {
-                    let imageHtml = '';
-                    const safeName = item.name.replace(/"/g, '\\"');
-                    const productRow = document.querySelector(
-                        `.product-table tbody tr[data-name="${safeName}"]`
-                    ); if (productRow) {
-                        const img = productRow.querySelector('.product-image');
-                        if (img) {
-                            imageHtml = `<img src="${img.src}" alt="${item.name}" style="width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #ddd;margin-right:10px;">`;
-                        }
+        if (tbody) {
+            tbody.innerHTML = cartItems.map((item) => {
+                let imageHtml = '';
+                const safeName = item.name.replace(/"/g, '\\"');
+                const productRow = document.querySelector(
+                    `.product-table tbody tr[data-name="${safeName}"]`
+                );
+                if (productRow) {
+                    const img = productRow.querySelector('.product-image');
+                    if (img) {
+                        imageHtml = `<img src="${img.src}" alt="${item.name}" style="width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #ddd;margin-right:10px;">`;
                     }
-                    const safeItemName = escapeHtmlAttr(item.name);
-                    return `
-    <tr>
-        <td>
-            <div style="display:flex;align-items:center;gap:0;">
-                ${imageHtml}
-                <strong>${item.name}</strong>
-            </div>
-        </td>
-        <td>
-            <div class="cart-qty-control">
-                <button type="button" class="cart-qty-btn cart-qty-minus" data-name="${safeItemName}"><i class="fas fa-minus"></i></button>
-                <span class="cart-qty-value">${item.qty}</span>
-                <button type="button" class="cart-qty-btn cart-qty-plus" data-name="${safeItemName}"><i class="fas fa-plus"></i></button>
-            </div>
-        </td>
-        <td>₹${item.price.toLocaleString('en-IN')}</td>
-        <td>₹${item.amount.toLocaleString('en-IN')}</td>
-        <td><button type="button" class="cart-remove-btn" data-name="${safeItemName}"><i class="fas fa-trash-alt"></i> Remove</button></td>
-    </tr>
+                }
+                const safeItemName = escapeHtmlAttr(item.name);
+                return `
+<tr>
+    <td>
+        <div style="display:flex;align-items:center;gap:0;">
+            ${imageHtml}
+            <strong>${item.name}</strong>
+        </div>
+    </td>
+    <td>
+        <div class="cart-qty-control">
+            <button type="button" class="cart-qty-btn cart-qty-minus" data-name="${safeItemName}"><i class="fas fa-minus"></i></button>
+            <span class="cart-qty-value">${item.qty}</span>
+            <button type="button" class="cart-qty-btn cart-qty-plus" data-name="${safeItemName}"><i class="fas fa-plus"></i></button>
+        </div>
+    </td>
+    <td>₹${item.price.toLocaleString('en-IN')}</td>
+    <td>₹${item.amount.toLocaleString('en-IN')}</td>
+    <td><button type="button" class="cart-remove-btn" data-name="${safeItemName}"><i class="fas fa-trash-alt"></i> Remove</button></td>
+</tr>
 `;
-                }).join('');
+            }).join('');
 
-                tbody.querySelectorAll('.cart-qty-plus').forEach(btn => {
-                    btn.addEventListener('click', function () {
-                        const name = this.dataset.name;
-                        const current = CartManager.getCartItems().find(i => i.name === name);
-                        const price = current ? current.price : 0;
-                        const mrp = current ? current.mrp : price;
-                        CartManager.updateQuantity(name, (current ? current.qty : 0) + 1, price, mrp);
+            tbody.querySelectorAll('.cart-qty-plus').forEach(btn => {
+                btn.addEventListener('click', function () {
+                    const name = this.dataset.name;
+                    const current = CartManager.getCartItems().find(i => i.name === name);
+                    const price = current ? current.price : 0;
+                    const mrp = current ? current.mrp : price;
+                    CartManager.updateQuantity(name, (current ? current.qty : 0) + 1, price, mrp);
+                    renderCartModal();
+                });
+            });
+
+            tbody.querySelectorAll('.cart-qty-minus').forEach(btn => {
+                btn.addEventListener('click', function () {
+                    const name = this.dataset.name;
+                    const current = CartManager.getCartItems().find(i => i.name === name);
+                    if (!current) return;
+                    if (current.qty > 1) {
+                        CartManager.updateQuantity(name, current.qty - 1, current.price, current.mrp);
                         renderCartModal();
-                    });
-                });
-
-                tbody.querySelectorAll('.cart-qty-minus').forEach(btn => {
-                    btn.addEventListener('click', function () {
-                        const name = this.dataset.name;
-                        const current = CartManager.getCartItems().find(i => i.name === name);
-                        if (!current) return;
-                        if (current.qty > 1) {
-                            CartManager.updateQuantity(name, current.qty - 1, current.price, current.mrp);
-                            renderCartModal();
-                        } else {
-                            if (confirm(`Remove "${name}" from cart?`)) {
-                                CartManager.removeItem(name);
-                                renderCartModal();
-                            }
-                        }
-                    });
-                });
-
-                tbody.querySelectorAll('.cart-remove-btn').forEach(btn => {
-                    btn.addEventListener('click', function () {
-                        const name = this.dataset.name;
+                    } else {
                         if (confirm(`Remove "${name}" from cart?`)) {
                             CartManager.removeItem(name);
                             renderCartModal();
                         }
-                    });
-                });
-            }
-
-            if (warningEl) {
-                if (totalAmount > 0 && totalAmount < minOrder) {
-                    warningEl.style.display = 'flex';
-                    if (warningTotalEl) warningTotalEl.textContent = '₹' + totalAmount.toLocaleString('en-IN');
-                } else {
-                    warningEl.style.display = 'none';
-                }
-            }
-        }
-
-        function setupFilters() {
-            function filterProducts() {
-                const searchTerm = searchInput?.value?.toLowerCase().trim() || '';
-                const category = categorySelect?.value || 'all';
-                const rows = document.querySelectorAll('.product-table tbody tr');
-                let visibleCount = 0;
-
-                rows.forEach(function (row) {
-                    const name = row.dataset.name || '';
-                    const rowText = row.textContent.toLowerCase();
-                    const matchesSearch = name.toLowerCase().includes(searchTerm) || rowText.includes(searchTerm);
-                    const rowCategory = row.closest('.cat-section')?.dataset?.cat || '';
-                    const matchesCategory = category === 'all' || rowCategory === category;
-                    if (matchesSearch && matchesCategory) {
-                        row.style.display = '';
-                        visibleCount++;
-                    } else {
-                        row.style.display = 'none';
                     }
                 });
+            });
 
-                document.querySelectorAll('.cat-section').forEach(function (section) {
-                    const visibleRows = section.querySelectorAll('tbody tr[style*="display: none"]');
-                    const allRows = section.querySelectorAll('tbody tr');
-                    const hasVisible = visibleRows.length < allRows.length;
-                    const header = section.querySelector('.cat-header');
-                    const wrap = section.querySelector('.table-wrap');
-                    if (header) header.style.display = hasVisible ? 'flex' : 'none';
-                    if (wrap) wrap.style.display = hasVisible ? 'block' : 'none';
+            tbody.querySelectorAll('.cart-remove-btn').forEach(btn => {
+                btn.addEventListener('click', function () {
+                    const name = this.dataset.name;
+                    if (confirm(`Remove "${name}" from cart?`)) {
+                        CartManager.removeItem(name);
+                        renderCartModal();
+                    }
                 });
-
-                if (noResultsMsg) noResultsMsg.style.display = visibleCount === 0 ? 'block' : 'none';
-            }
-
-            if (searchInput) searchInput.addEventListener('input', filterProducts);
-            if (categorySelect) categorySelect.addEventListener('change', filterProducts);
+            });
         }
 
-        function openLightbox(imageUrl, productName) {
-            const overlay = document.getElementById('lightboxOverlay');
-            const img = document.getElementById('lightboxImage');
-            const counter = document.getElementById('lightboxCounter');
-            img.src = imageUrl || 'images/logo-removebg-preview.png';
-            img.alt = productName || 'Product Image';
-            counter.textContent = productName || '';
+        if (warningEl) {
+            if (totalAmount > 0 && totalAmount < minOrder) {
+                warningEl.style.display = 'flex';
+                if (warningTotalEl) warningTotalEl.textContent = '₹' + totalAmount.toLocaleString('en-IN');
+            } else {
+                warningEl.style.display = 'none';
+            }
+        }
+    }
+
+    function setupFilters() {
+        function filterProducts() {
+            const searchTerm = searchInput?.value?.toLowerCase().trim() || '';
+            const category = categorySelect?.value || 'all';
+            const rows = document.querySelectorAll('.product-table tbody tr');
+            let visibleCount = 0;
+
+            rows.forEach(function (row) {
+                const name = row.dataset.name || '';
+                const rowText = row.textContent.toLowerCase();
+                const matchesSearch = name.toLowerCase().includes(searchTerm) || rowText.includes(searchTerm);
+                const rowCategory = row.closest('.cat-section')?.dataset?.cat || '';
+                const matchesCategory = category === 'all' || rowCategory === category;
+                if (matchesSearch && matchesCategory) {
+                    row.style.display = '';
+                    visibleCount++;
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+
+            document.querySelectorAll('.cat-section').forEach(function (section) {
+                const hiddenRows = section.querySelectorAll('tbody tr[style*="display: none"]');
+                const allRows = section.querySelectorAll('tbody tr');
+                const hasVisible = hiddenRows.length < allRows.length;
+                const header = section.querySelector('.cat-header');
+                const wrap = section.querySelector('.table-wrap');
+                if (header) header.style.display = hasVisible ? 'flex' : 'none';
+                if (wrap) wrap.style.display = hasVisible ? 'block' : 'none';
+            });
+
+            if (noResultsMsg) noResultsMsg.style.display = visibleCount === 0 ? 'block' : 'none';
+        }
+
+        if (searchInput) searchInput.addEventListener('input', filterProducts);
+        if (categorySelect) categorySelect.addEventListener('change', filterProducts);
+    }
+
+    function openLightbox(imageUrl, productName) {
+        const overlay = document.getElementById('lightboxOverlay');
+        const img = document.getElementById('lightboxImage');
+        const counter = document.getElementById('lightboxCounter');
+        img.src = imageUrl || 'images/logo-removebg-preview.png';
+        img.alt = productName || 'Product Image';
+        counter.textContent = productName || '';
+        overlay.classList.add('active');
+        document.body.style.overflow = 'hidden';
+    }
+
+    function closeLightbox() {
+        const overlay = document.getElementById('lightboxOverlay');
+        overlay.classList.remove('active');
+        document.body.style.overflow = '';
+        document.getElementById('lightboxImage').src = '';
+    }
+    window.openLightbox = openLightbox;
+    window.closeLightbox = closeLightbox;
+
+    async function saveOrderToFirebase(orderData) {
+        try {
+            const counterRef = doc(db, 'settings', 'orderCounter');
+            const newOrderRef = doc(collection(db, 'orders'));
+
+            const { orderId, orderNumber } = await runTransaction(db, async (tx) => {
+                const snap = await tx.get(counterRef);
+                const next = (snap.exists() ? (snap.data().lastOrderNumber || 0) : 0) + 1;
+                const orderId = 'QC' + String(next).padStart(3, '0');
+
+                tx.set(counterRef, {
+                    lastOrderNumber: next,
+                    lastUpdated: serverTimestamp()
+                }, { merge: true });
+
+                tx.set(newOrderRef, {
+                    orderId,
+                    orderNumber: next,
+                    customerName: orderData.name,
+                    customerPhone: orderData.phone,
+                    customerEmail: orderData.email || '',
+                    customerAddress: orderData.address || '',
+                    customerState: orderData.state || 'TamilNadu & PY',
+                    items: orderData.items,
+                    totalItems: orderData.totalItems,
+                    totalAmount: orderData.totalAmount,
+                    orderDate: new Date().toISOString(),
+                    createdAt: serverTimestamp(),
+                    timestamp: serverTimestamp(),
+                    status: 'pending',
+                    source: 'website',
+                    whatsappSent: true,
+
+                    pickupTransport: 'Mettur Transports',
+                    pickupBranchName: selectedPickupBranch ? selectedPickupBranch.name : '',
+                    pickupBranchAddress: selectedPickupBranch ? selectedPickupBranch.address : '',
+                    pickupBranchCity: selectedPickupBranch ? selectedPickupBranch.city : '',
+                    pickupBranchPhone: selectedPickupBranch ? selectedPickupBranch.phone : ''
+                });
+
+                return { orderId, orderNumber: next };
+            });
+
+            return { docId: newOrderRef.id, orderId, orderNumber };
+        } catch (error) {
+            console.error('Save order error:', error);
+            return null;
+        }
+    }
+
+    function renderOrderSummaryModal() {
+        const { cartItems, totalItems, totalAmount, totalDiscount } = collectCartItems();
+        const minOrder = getMinOrder();
+        const emptyMsg = document.getElementById('os-empty-msg');
+        const table = document.getElementById('os-table');
+        const tbody = document.getElementById('os-tbody');
+        const totalProductsEl = document.getElementById('os-total-products');
+        const discountEl = document.getElementById('os-discount');
+        const overallTotalEl = document.getElementById('os-overall-total');
+        const grandTotalEl = document.getElementById('os-grand-total');
+        const warningEl = document.getElementById('os-min-order-warning');
+        const warningTotalEl = document.getElementById('os-warning-total');
+
+        if (totalProductsEl) totalProductsEl.textContent = totalItems;
+        if (discountEl) discountEl.textContent = '₹' + totalDiscount.toLocaleString('en-IN');
+        if (overallTotalEl) overallTotalEl.textContent = '₹' + totalAmount.toLocaleString('en-IN');
+        if (grandTotalEl) grandTotalEl.textContent = '₹' + totalAmount.toLocaleString('en-IN');
+
+        if (cartItems.length === 0) {
+            if (emptyMsg) emptyMsg.style.display = 'block';
+            if (table) table.style.display = 'none';
+        } else {
+            if (emptyMsg) emptyMsg.style.display = 'none';
+            if (table) table.style.display = 'table';
+            if (tbody) {
+                tbody.innerHTML = cartItems.map(item => `
+                <tr>
+                    <td>${item.name}</td>
+                    <td>${item.qty}</td>
+                    <td>₹${item.price.toLocaleString('en-IN')}</td>
+                    <td>₹${item.amount.toLocaleString('en-IN')}</td>
+                </tr>
+            `).join('');
+            }
+        }
+
+        if (warningEl) {
+            if (totalAmount > 0 && totalAmount < minOrder) {
+                warningEl.style.display = 'flex';
+                if (warningTotalEl) warningTotalEl.textContent = '₹' + totalAmount.toLocaleString('en-IN');
+            } else {
+                warningEl.style.display = 'none';
+            }
+        }
+
+        // Update UPI links with current total
+        if (typeof window.updateUPILinks === 'function') {
+            window.updateUPILinks(totalAmount);
+        }
+    }
+
+    /* ============================================================
+       PDF
+       ============================================================ */
+    let _pdfLogoCache = null;
+    function getPdfLogoDataUrl() {
+        return _pdfLogoCache || (_pdfLogoCache = new Promise(res => {
+            const im = new Image();
+            im.crossOrigin = 'anonymous';
+            im.onload = () => {
+                try {
+                    const w = 300, h = Math.round(im.naturalHeight * w / im.naturalWidth);
+                    const cv = document.createElement('canvas');
+                    cv.width = w; cv.height = h;
+                    const cx = cv.getContext('2d');
+                    cx.fillStyle = '#fff';
+                    cx.fillRect(0, 0, w, h);
+                    cx.drawImage(im, 0, 0, w, h);
+                    res(cv.toDataURL('image/png'));
+                } catch (e) { res(null); }
+            };
+            im.onerror = () => res(null);
+            im.src = 'images/logo-removebg-preview.png';
+        }));
+    }
+
+    async function generateOrderPDF(orderData) {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF();
+
+        const RED = [230, 0, 0];
+        const RED_DARK = [139, 0, 0];
+        const YELLOW = [255, 193, 7];
+        const GREY = [100, 100, 100];
+
+        const logoData = await getPdfLogoDataUrl();
+        if (logoData) {
+            try {
+                doc.addImage(logoData, 'PNG', 88, 6, 34, 18, '', 'FAST');
+            } catch (e) { console.warn('Logo add failed:', e); }
+        }
+
+        doc.setFontSize(22);
+        doc.setTextColor(...RED);
+        doc.setFont(undefined, "bold");
+        doc.text("Q CRACKERS", 105, 32, { align: "center" });
+
+        doc.setFontSize(9);
+        doc.setTextColor(...GREY);
+        doc.setFont(undefined, "normal");
+        doc.text("Sivakasi Fireworks", 105, 38, { align: "center" });
+
+        doc.setFontSize(8);
+        doc.setTextColor(120);
+        doc.text("Sivakasi, Tamil Nadu  |  +91 96555 86461  |  qcrackerss@gmail.com", 105, 43, { align: "center" });
+
+        doc.setDrawColor(...RED);
+        doc.setLineWidth(1.2);
+        doc.line(14, 47, 196, 47);
+
+        doc.setFillColor(255, 245, 245);
+        doc.roundedRect(14, 52, 182, 16, 2, 2, 'F');
+
+        doc.setFontSize(11);
+        doc.setTextColor(...RED_DARK);
+        doc.setFont(undefined, "bold");
+        doc.text(`Order ID: ${orderData.orderId || 'N/A'}`, 18, 60);
+
+        doc.setFont(undefined, "normal");
+        doc.setFontSize(9);
+        doc.setTextColor(...GREY);
+        doc.text(`Date: ${orderData.orderDate}`, 192, 60, { align: "right" });
+
+        doc.setFontSize(10);
+        doc.setTextColor(...RED);
+        doc.setFont(undefined, "bold");
+        doc.text("BILL TO", 14, 78);
+
+        doc.setDrawColor(...YELLOW);
+        doc.setLineWidth(0.5);
+        doc.line(14, 80, 45, 80);
+
+        doc.setFontSize(9);
+        doc.setTextColor(0);
+        doc.setFont(undefined, "normal");
+        doc.text(`Name: ${orderData.name}`, 14, 86);
+        doc.text(`Phone: ${orderData.phone}`, 14, 91);
+        if (orderData.email) doc.text(`Email: ${orderData.email}`, 14, 96);
+
+        const addressLines = doc.splitTextToSize(`Address: ${orderData.address}`, 90);
+        doc.text(addressLines, 14, 101);
+        const addressBottom = 101 + (addressLines.length - 1) * 5;
+        doc.text(`State: ${orderData.state}`, 14, addressBottom + 5);
+
+        let pickupBottom = addressBottom + 5;
+        if (orderData.pickupBranch) {
+            doc.setDrawColor(...RED);
+            doc.setFillColor(255, 245, 245);
+            doc.roundedRect(110, 74, 86, 34, 2, 2, 'FD');
+
+            doc.setFontSize(9);
+            doc.setTextColor(...RED);
+            doc.setFont(undefined, "bold");
+            doc.text("PICKUP DETAILS", 114, 80);
+
+            doc.setTextColor(0);
+            doc.setFont(undefined, "normal");
+            doc.setFontSize(8);
+            doc.text(`Transport: Mettur Transports`, 114, 86);
+            doc.text(`Branch: ${orderData.pickupBranch.name}`, 114, 91);
+
+            const branchAddrLines = doc.splitTextToSize(`Address: ${orderData.pickupBranch.address}`, 78);
+            doc.text(branchAddrLines, 114, 96);
+
+            if (orderData.pickupBranch.phone) {
+                doc.text(`Phone: ${orderData.pickupBranch.phone}`, 114, 96 + branchAddrLines.length * 4 + 2);
+            }
+
+            pickupBottom = Math.max(pickupBottom, 96 + branchAddrLines.length * 4 + 8);
+        }
+
+        let y = Math.max(addressBottom + 12, pickupBottom + 8);
+
+        doc.setFillColor(...RED);
+        doc.rect(14, y - 6, 182, 9, "F");
+        doc.setTextColor(255);
+        doc.setFontSize(9);
+        doc.setFont(undefined, "bold");
+        doc.text("S.No", 17, y);
+        doc.text("Product", 32, y);
+        doc.text("Qty", 128, y, { align: "center" });
+        doc.text("Price", 150, y, { align: "right" });
+        doc.text("Amount", 192, y, { align: "right" });
+
+        doc.setTextColor(0);
+        doc.setFont(undefined, "normal");
+        y += 8;
+        orderData.items.forEach((item, i) => {
+            if (y > 265) {
+                doc.addPage();
+                y = 20;
+            }
+            doc.setFontSize(8.5);
+            const nameLines = doc.splitTextToSize(item.name, 90);
+
+            if (i % 2 === 0) {
+                doc.setFillColor(255, 250, 250);
+                doc.rect(14, y - 5, 182, Math.max(7, nameLines.length * 5 + 2), 'F');
+            }
+
+            doc.text(String(i + 1), 17, y);
+            doc.text(nameLines, 32, y);
+            doc.text(String(item.qty), 128, y, { align: "center" });
+            doc.text(`${item.price}`, 150, y, { align: "right" });
+            doc.text(`${item.amount}`, 192, y, { align: "right" });
+
+            y += Math.max(7, nameLines.length * 5 + 2);
+        });
+
+        doc.setDrawColor(...RED);
+        doc.setLineWidth(0.5);
+        doc.line(14, y - 2, 196, y - 2);
+
+        y += 8;
+        doc.setFillColor(...RED);
+        doc.roundedRect(14, y - 6, 182, 14, 2, 2, "F");
+        doc.setTextColor(255);
+        doc.setFontSize(11);
+        doc.setFont(undefined, "bold");
+        doc.text(`Total Items: ${orderData.totalItems}`, 18, y + 2);
+        doc.setFontSize(13);
+        doc.text(`Grand Total: Rs.${orderData.totalAmount.toLocaleString('en-IN')}`, 192, y + 2, { align: "right" });
+
+        y += 22;
+        doc.setDrawColor(...YELLOW);
+        doc.setLineWidth(0.8);
+        doc.line(14, y, 196, y);
+
+        doc.setTextColor(...RED);
+        doc.setFontSize(10);
+        doc.setFont(undefined, "bold");
+        doc.text("Thank you for choosing Q Crackers!", 105, y + 8, { align: "center" });
+
+        doc.setFontSize(8);
+        doc.setFont(undefined, "normal");
+        doc.setTextColor(...GREY);
+        doc.text("Wishing you a Safe, Bright & Joyful Celebration!", 105, y + 14, { align: "center" });
+        doc.text("This is a computer-generated invoice. No signature required.", 105, y + 19, { align: "center" });
+
+        return doc;
+    }
+
+    async function downloadBill() {
+        const { cartItems, totalItems, totalAmount } = collectCartItems();
+        if (totalItems === 0) { alert('Cart is empty!'); return; }
+
+        const name = document.getElementById('client-name')?.value || 'Customer';
+        const phone = document.getElementById('client-phone')?.value || '';
+        const email = document.getElementById('client-email')?.value || '';
+        const address = document.getElementById('client-address')?.value || '';
+        const state = document.getElementById('client-state')?.value || 'TamilNadu & PY';
+
+        let orderId = 'QC001';
+        try {
+            const counterRef = doc(db, 'settings', 'orderCounter');
+            const counterSnap = await getDoc(counterRef);
+            const nextNumber = counterSnap.exists()
+                ? (counterSnap.data().lastOrderNumber || 0) + 1
+                : 1;
+            orderId = 'QC' + String(nextNumber).padStart(3, '0');
+        } catch (e) {
+            console.error('Counter error:', e);
+            orderId = 'QC' + String(Date.now()).slice(-6);
+        }
+
+        const timeStr = new Date().toLocaleString('en-IN', {
+            day: '2-digit', month: '2-digit', year: 'numeric',
+            hour: '2-digit', minute: '2-digit', hour12: true
+        });
+
+        const orderData = {
+            orderId, name, phone, email, address, state,
+            items: cartItems.map(item => ({ name: item.name, qty: item.qty, price: item.price, amount: item.amount })),
+            totalItems, totalAmount, orderDate: timeStr,
+            pickupBranch: selectedPickupBranch
+        };
+
+        const pdf = await generateOrderPDF(orderData);
+        pdf.save(`${orderId}.pdf`);
+    }
+
+    let isPlacingOrder = false;
+
+    async function sendToWhatsApp() {
+        if (isPlacingOrder) return;
+
+        const { cartItems, totalItems, totalAmount } = collectCartItems();
+        if (totalItems === 0) { alert('Cart is empty!'); return; }
+
+        const name = document.getElementById('client-name')?.value || 'Customer';
+        const phone = document.getElementById('client-phone')?.value || '';
+        const email = document.getElementById('client-email')?.value || '';
+        const address = document.getElementById('client-address')?.value || '';
+        const state = document.getElementById('client-state')?.value || 'TamilNadu & PY';
+
+        if (!name || !phone || !address) {
+            alert('Please fill all required fields (Name, Phone, Address)');
+            return;
+        }
+
+        isPlacingOrder = true;
+        const placeBtn = document.getElementById('cart-send-whatsapp');
+        placeBtn.disabled = true;
+        placeBtn.textContent = 'Placing Order...';
+
+        const timeStr = new Date().toLocaleString('en-IN', {
+            day: '2-digit', month: '2-digit', year: 'numeric',
+            hour: '2-digit', minute: '2-digit', hour12: true
+        });
+
+        const saved = await saveOrderToFirebase({
+            name, phone, email, address, state,
+            items: cartItems.map(item => ({
+                name: item.name, qty: item.qty, price: item.price, amount: item.amount
+            })),
+            totalItems, totalAmount
+        });
+
+        if (!saved) {
+            alert('Order save aagala. Please try again.');
+            isPlacingOrder = false;
+            placeBtn.disabled = false;
+            placeBtn.textContent = 'Place Order';
+            return;
+        }
+
+        currentOrderId = saved.docId;
+        const orderId = saved.orderId;
+
+        let message = `🧨 *Q Crackers - New Order*\n`;
+        message += `━━━━━━━━━━━━━━━━━━━\n\n`;
+        message += `📋 *Order ID:* ${orderId}\n`;
+        message += `🕐 *Date & Time:* ${timeStr}\n\n`;
+        message += `👤 *Customer Details*\n`;
+        message += `Name: ${name}\n`;
+        if (phone) message += `Phone: ${phone}\n`;
+        if (email) message += `Email: ${email}\n`;
+        if (address) message += `Address: ${address}\n`;
+        message += `State: ${state}\n`;
+        if (selectedPickupBranch) {
+            message += `\n🚚 *Pickup Branch:* ${selectedPickupBranch.name}\n`;
+            message += `📍 ${selectedPickupBranch.address}\n`;
+            if (selectedPickupBranch.phone) message += `📞 ${selectedPickupBranch.phone}\n`;
+        }
+        message += `\n📦 *Order Items*\n`;
+        message += `━━━━━━━━━━━━━━━━━━━\n`;
+        cartItems.forEach((item, index) => {
+            message += `  ${index + 1}. ${item.name}\n`;
+            message += `     Qty: ${item.qty} × ₹${item.price.toLocaleString('en-IN')} = ₹${item.amount.toLocaleString('en-IN')}\n`;
+        });
+        message += `━━━━━━━━━━━━━━━━━━━\n`;
+        message += `*Total Items:* ${totalItems}\n`;
+        message += `*Total Amount:* ₹${totalAmount.toLocaleString('en-IN')}\n\n`;
+        message += `_Thank you for ordering from Q Crackers!_ 🎆`;
+
+        window.open(`https://wa.me/919655586461?text=${encodeURIComponent(message)}`, '_blank');
+
+        document.getElementById('order-summary-modal').classList.remove('active');
+        document.getElementById('cart-modal').classList.remove('active');
+        showOrderSuccess();
+    }
+
+    function showOrderSuccess() {
+        const overlay = document.getElementById('orderSuccessOverlay');
+        if (overlay) {
             overlay.classList.add('active');
             document.body.style.overflow = 'hidden';
+            setTimeout(function () {
+                overlay.classList.remove('active');
+                document.body.style.overflow = '';
+                resetCartAfterOrder();
+                window.location.href = 'index.html';
+            }, 10000);
         }
+    }
 
-        function closeLightbox() {
-            const overlay = document.getElementById('lightboxOverlay');
-            overlay.classList.remove('active');
-            document.body.style.overflow = '';
-            document.getElementById('lightboxImage').src = '';
+    function resetCartAfterOrder() {
+        if (typeof CartManager !== 'undefined') {
+            CartManager.clearCart();
         }
-        window.openLightbox = openLightbox;
-        window.closeLightbox = closeLightbox;
+        document.querySelector('.catalog-info')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
 
-        async function saveOrderToFirebase(orderData) {
-            try {
-                const counterRef = doc(db, 'settings', 'orderCounter');
-                const newOrderRef = doc(collection(db, 'orders'));   // auto doc id
-
-                const { orderId, orderNumber } = await runTransaction(db, async (tx) => {
-                    const snap = await tx.get(counterRef);
-                    const next = (snap.exists() ? (snap.data().lastOrderNumber || 0) : 0) + 1;
-                    const orderId = 'QC' + String(next).padStart(3, '0');
-
-                    tx.set(counterRef, {
-                        lastOrderNumber: next,
-                        lastUpdated: serverTimestamp()
-                    }, { merge: true });
-
-                    tx.set(newOrderRef, {
-                        orderId,
-                        orderNumber: next,
-                        customerName: orderData.name,
-                        customerPhone: orderData.phone,
-                        customerEmail: orderData.email || '',
-                        customerAddress: orderData.address || '',
-                        customerState: orderData.state || 'TamilNadu & PY',
-                        items: orderData.items,
-                        totalItems: orderData.totalItems,
-                        totalAmount: orderData.totalAmount,
-                        orderDate: new Date().toISOString(),
-                        createdAt: serverTimestamp(),
-                        timestamp: serverTimestamp(),
-                        status: 'pending',
-                        source: 'website',
-                        whatsappSent: true,
-
-                        pickupTransport: 'Mettur Transports',
-                        pickupBranchName: selectedPickupBranch ? selectedPickupBranch.name : '',
-                        pickupBranchAddress: selectedPickupBranch ? selectedPickupBranch.address : '',
-                        pickupBranchCity: selectedPickupBranch ? selectedPickupBranch.city : '',
-                        pickupBranchPhone: selectedPickupBranch ? selectedPickupBranch.phone : ''
-                    });
-
-                    return { orderId, orderNumber: next };
-                });
-
-                return { docId: newOrderRef.id, orderId, orderNumber };
-            } catch (error) {
-                console.error('Save order error:', error);
-                return null;
-            }
-        }
-
-        function renderOrderSummaryModal() {
-            const { cartItems, totalItems, totalAmount, totalDiscount } = collectCartItems();
-            const minOrder = 2500;
-
-            const emptyMsg = document.getElementById('os-empty-msg');
-            const table = document.getElementById('os-table');
-            const tbody = document.getElementById('os-tbody');
-            const totalProductsEl = document.getElementById('os-total-products');
-            const discountEl = document.getElementById('os-discount');
-            const overallTotalEl = document.getElementById('os-overall-total');
-            const grandTotalEl = document.getElementById('os-grand-total');
-            const warningEl = document.getElementById('os-min-order-warning');
-            const warningTotalEl = document.getElementById('os-warning-total');
-
-            if (totalProductsEl) totalProductsEl.textContent = totalItems;
-            if (discountEl) discountEl.textContent = '₹' + totalDiscount.toLocaleString('en-IN');
-            if (overallTotalEl) overallTotalEl.textContent = '₹' + totalAmount.toLocaleString('en-IN');
-            if (grandTotalEl) grandTotalEl.textContent = '₹' + totalAmount.toLocaleString('en-IN');
-
-            if (cartItems.length === 0) {
-                if (emptyMsg) emptyMsg.style.display = 'block';
-                if (table) table.style.display = 'none';
-            } else {
-                if (emptyMsg) emptyMsg.style.display = 'none';
-                if (table) table.style.display = 'table';
-                if (tbody) {
-                    tbody.innerHTML = cartItems.map(item => `
-                    <tr>
-                        <td>${item.name}</td>
-                        <td>${item.qty}</td>
-                        <td>₹${item.price.toLocaleString('en-IN')}</td>
-                        <td>₹${item.amount.toLocaleString('en-IN')}</td>
-                    </tr>
-                `).join('');
-                }
-            }
-
-            if (warningEl) {
-                if (totalAmount > 0 && totalAmount < minOrder) {
-                    warningEl.style.display = 'flex';
-                    if (warningTotalEl) warningTotalEl.textContent = '₹' + totalAmount.toLocaleString('en-IN');
-                } else {
-                    warningEl.style.display = 'none';
-                }
-            }
-        }
-
-        // ============================================================
-        // LOGO — PDF-ku convert (professional look)
-        // ============================================================
-        let _pdfLogoCache = null;
-        function getPdfLogoDataUrl() {
-            return _pdfLogoCache || (_pdfLogoCache = new Promise(res => {
-                const im = new Image();
-                im.crossOrigin = 'anonymous';
-                im.onload = () => {
-                    try {
-                        const w = 300, h = Math.round(im.naturalHeight * w / im.naturalWidth);
-                        const cv = document.createElement('canvas');
-                        cv.width = w; cv.height = h;
-                        const cx = cv.getContext('2d');
-                        cx.fillStyle = '#fff';
-                        cx.fillRect(0, 0, w, h);
-                        cx.drawImage(im, 0, 0, w, h);
-                        res(cv.toDataURL('image/png'));
-                    } catch (e) { res(null); }
-                };
-                im.onerror = () => res(null);
-                im.src = 'images/logo-removebg-preview.png';
-            }));
-        }
-
-        async function generateOrderPDF(orderData) {
-            const { jsPDF } = window.jspdf;
-            const doc = new jsPDF();
-
-            // ============================================================
-            // THEME COLORS — RED + YELLOW
-            // ============================================================
-            const RED = [230, 0, 0];            // #e60000
-            const RED_DARK = [139, 0, 0];       // #8B0000
-            const YELLOW = [255, 193, 7];       // #ffc107
-            const GREY = [100, 100, 100];
-
-            // ============================================================
-            // LOGO (top center)
-            // ============================================================
-            const logoData = await getPdfLogoDataUrl();
-            if (logoData) {
+    async function updateFirestoreWithImageUrls() {
+        try {
+            const productsRef = collection(db, 'products');
+            const snapshot = await getDocs(productsRef);
+            for (const docSnap of snapshot.docs) {
+                const data = docSnap.data();
+                if (data.imageUrl && data.imageUrl.startsWith('http')) continue;
+                if (!data.imageFilename) continue;
                 try {
-                    doc.addImage(logoData, 'PNG', 88, 6, 34, 18, '', 'FAST');
-                } catch (e) { console.warn('Logo add failed:', e); }
+                    const storageRef = ref(storage, data.imageFilename);
+                    const url = await getDownloadURL(storageRef);
+                    await updateDoc(doc(db, 'products', docSnap.id), { imageUrl: url });
+                } catch (e) { }
             }
-
-            // ============================================================
-            // SHOP NAME
-            // ============================================================
-            doc.setFontSize(22);
-            doc.setTextColor(...RED);
-            doc.setFont(undefined, "bold");
-            doc.text("Q CRACKERS", 105, 32, { align: "center" });
-
-            doc.setFontSize(9);
-            doc.setTextColor(...GREY);
-            doc.setFont(undefined, "normal");
-            doc.text("Sivakasi Fireworks", 105, 38, { align: "center" });
-
-            doc.setFontSize(8);
-            doc.setTextColor(120);
-            doc.text("Sivakasi, Tamil Nadu  |  +91 96555 86461  |  qcrackerss@gmail.com", 105, 43, { align: "center" });
-
-            // Red divider
-            doc.setDrawColor(...RED);
-            doc.setLineWidth(1.2);
-            doc.line(14, 47, 196, 47);
-
-            // ============================================================
-            // ORDER INFO BOX — Order ID (bold, red)
-            // ============================================================
-            doc.setFillColor(255, 245, 245);
-            doc.roundedRect(14, 52, 182, 16, 2, 2, 'F');
-
-            doc.setFontSize(11);
-            doc.setTextColor(...RED_DARK);
-            doc.setFont(undefined, "bold");
-            doc.text(`Order ID: ${orderData.orderId || 'N/A'}`, 18, 60);
-
-            doc.setFont(undefined, "normal");
-            doc.setFontSize(9);
-            doc.setTextColor(...GREY);
-            doc.text(`Date: ${orderData.orderDate}`, 192, 60, { align: "right" });
-
-            // ============================================================
-            // BILL TO SECTION
-            // ============================================================
-            doc.setFontSize(10);
-            doc.setTextColor(...RED);
-            doc.setFont(undefined, "bold");
-            doc.text("BILL TO", 14, 78);
-
-            doc.setDrawColor(...YELLOW);
-            doc.setLineWidth(0.5);
-            doc.line(14, 80, 45, 80);
-
-            doc.setFontSize(9);
-            doc.setTextColor(0);
-            doc.setFont(undefined, "normal");
-            doc.text(`Name: ${orderData.name}`, 14, 86);
-            doc.text(`Phone: ${orderData.phone}`, 14, 91);
-            if (orderData.email) doc.text(`Email: ${orderData.email}`, 14, 96);
-
-            const addressLines = doc.splitTextToSize(`Address: ${orderData.address}`, 90);
-            doc.text(addressLines, 14, 101);
-            const addressBottom = 101 + (addressLines.length - 1) * 5;
-            doc.text(`State: ${orderData.state}`, 14, addressBottom + 5);
-
-            // ============================================================
-            // PICKUP DETAILS BOX (right side)
-            // ============================================================
-            let pickupBottom = addressBottom + 5;
-            if (orderData.pickupBranch) {
-                doc.setDrawColor(...RED);
-                doc.setFillColor(255, 245, 245);
-                doc.roundedRect(110, 74, 86, 34, 2, 2, 'FD');
-
-                doc.setFontSize(9);
-                doc.setTextColor(...RED);
-                doc.setFont(undefined, "bold");
-                doc.text("PICKUP DETAILS", 114, 80);
-
-                doc.setTextColor(0);
-                doc.setFont(undefined, "normal");
-                doc.setFontSize(8);
-                doc.text(`Transport: Mettur Transports`, 114, 86);
-                doc.text(`Branch: ${orderData.pickupBranch.name}`, 114, 91);
-
-                const branchAddrLines = doc.splitTextToSize(`Address: ${orderData.pickupBranch.address}`, 78);
-                doc.text(branchAddrLines, 114, 96);
-
-                if (orderData.pickupBranch.phone) {
-                    doc.text(`Phone: ${orderData.pickupBranch.phone}`, 114, 96 + branchAddrLines.length * 4 + 2);
-                }
-
-                pickupBottom = Math.max(pickupBottom, 96 + branchAddrLines.length * 4 + 8);
-            }
-
-            // ============================================================
-            // TABLE HEADER — RED background
-            // ============================================================
-            let y = Math.max(addressBottom + 12, pickupBottom + 8);
-
-            doc.setFillColor(...RED);
-            doc.rect(14, y - 6, 182, 9, "F");
-            doc.setTextColor(255);
-            doc.setFontSize(9);
-            doc.setFont(undefined, "bold");
-            doc.text("S.No", 17, y);
-            doc.text("Product", 32, y);
-            doc.text("Qty", 128, y, { align: "center" });
-            doc.text("Price", 150, y, { align: "right" });
-            doc.text("Amount", 192, y, { align: "right" });
-
-            // ============================================================
-            // TABLE ROWS — alternating background
-            // ============================================================
-            doc.setTextColor(0);
-            doc.setFont(undefined, "normal");
-            y += 8;
-            orderData.items.forEach((item, i) => {
-                if (y > 265) {
-                    doc.addPage();
-                    y = 20;
-                }
-                doc.setFontSize(8.5);
-                const nameLines = doc.splitTextToSize(item.name, 90);
-
-                if (i % 2 === 0) {
-                    doc.setFillColor(255, 250, 250);
-                    doc.rect(14, y - 5, 182, Math.max(7, nameLines.length * 5 + 2), 'F');
-                }
-
-                doc.text(String(i + 1), 17, y);
-                doc.text(nameLines, 32, y);
-                doc.text(String(item.qty), 128, y, { align: "center" });
-                doc.text(`${item.price}`, 150, y, { align: "right" });
-                doc.text(`${item.amount}`, 192, y, { align: "right" });
-
-                y += Math.max(7, nameLines.length * 5 + 2);
-            });
-
-            // Table bottom border
-            doc.setDrawColor(...RED);
-            doc.setLineWidth(0.5);
-            doc.line(14, y - 2, 196, y - 2);
-
-            // ============================================================
-            // GRAND TOTAL BOX — RED
-            // ============================================================
-            y += 8;
-            doc.setFillColor(...RED);
-            doc.roundedRect(14, y - 6, 182, 14, 2, 2, "F");
-            doc.setTextColor(255);
-            doc.setFontSize(11);
-            doc.setFont(undefined, "bold");
-            doc.text(`Total Items: ${orderData.totalItems}`, 18, y + 2);
-            doc.setFontSize(13);
-            doc.text(`Grand Total: Rs.${orderData.totalAmount.toLocaleString('en-IN')}`, 192, y + 2, { align: "right" });
-
-            // ============================================================
-            // FOOTER
-            // ============================================================
-            y += 22;
-            doc.setDrawColor(...YELLOW);
-            doc.setLineWidth(0.8);
-            doc.line(14, y, 196, y);
-
-            doc.setTextColor(...RED);
-            doc.setFontSize(10);
-            doc.setFont(undefined, "bold");
-            doc.text("Thank you for choosing Q Crackers!", 105, y + 8, { align: "center" });
-
-            doc.setFontSize(8);
-            doc.setFont(undefined, "normal");
-            doc.setTextColor(...GREY);
-            doc.text("Wishing you a Safe, Bright & Joyful Celebration!", 105, y + 14, { align: "center" });
-            doc.text("This is a computer-generated invoice. No signature required.", 105, y + 19, { align: "center" });
-
-            return doc;
+            return true;
+        } catch (error) {
+            return false;
         }
-        async function downloadBill() {
-            const { cartItems, totalItems, totalAmount } = collectCartItems();
-            if (totalItems === 0) { alert('Cart is empty!'); return; }
+    }
 
-            const name = document.getElementById('client-name')?.value || 'Customer';
-            const phone = document.getElementById('client-phone')?.value || '';
-            const email = document.getElementById('client-email')?.value || '';
-            const address = document.getElementById('client-address')?.value || '';
-            const state = document.getElementById('client-state')?.value || 'TamilNadu & PY';
-
-            // ============================================================
-            // ✅ SEQUENTIAL ORDER ID — Firebase counter-la irundhu
-            // (Aana counter-a increment pannaama, preview mattum)
-            // ============================================================
-            let orderId = 'QC001';
+    /* ============================================================
+       PRICE LIST BUTTON + UPI LINKS  (moved into this module)
+       ============================================================ */
+    const priceListBtn = document.getElementById("priceListBtn");
+    if (priceListBtn) {
+        priceListBtn.addEventListener("click", async (e) => {
+            e.preventDefault();
             try {
-                const counterRef = doc(db, 'settings', 'orderCounter');
-                const counterSnap = await getDoc(counterRef);
-                const nextNumber = counterSnap.exists()
-                    ? (counterSnap.data().lastOrderNumber || 0) + 1
-                    : 1;
-                orderId = 'QC' + String(nextNumber).padStart(3, '0');
-            } catch (e) {
-                console.error('Counter error:', e);
-                // Fallback — timestamp
-                orderId = 'QC' + String(Date.now()).slice(-6);
-            }
-
-            const timeStr = new Date().toLocaleString('en-IN', {
-                day: '2-digit', month: '2-digit', year: 'numeric',
-                hour: '2-digit', minute: '2-digit', hour12: true
-            });
-
-            const orderData = {
-                orderId, name, phone, email, address, state,
-                items: cartItems.map(item => ({ name: item.name, qty: item.qty, price: item.price, amount: item.amount })),
-                totalItems, totalAmount, orderDate: timeStr,
-                pickupBranch: selectedPickupBranch
-            };
-
-            // ✅ await add panniten — logo load aana appuram thaan PDF generate aagum
-            const pdf = await generateOrderPDF(orderData);
-            pdf.save(`${orderId}.pdf`);
-        }
-
-
-        let isPlacingOrder = false;
-
-        async function sendToWhatsApp() {
-            if (isPlacingOrder) return;                       // double click block
-
-            const { cartItems, totalItems, totalAmount } = collectCartItems();
-            if (totalItems === 0) { alert('Cart is empty!'); return; }
-
-            const name = document.getElementById('client-name')?.value || 'Customer';
-            const phone = document.getElementById('client-phone')?.value || '';
-            const email = document.getElementById('client-email')?.value || '';
-            const address = document.getElementById('client-address')?.value || '';
-            const state = document.getElementById('client-state')?.value || 'TamilNadu & PY';
-
-            if (!name || !phone || !address) {
-                alert('Please fill all required fields (Name, Phone, Address)');
-                return;
-            }
-
-            isPlacingOrder = true;
-            const placeBtn = document.getElementById('cart-send-whatsapp');
-            placeBtn.disabled = true;
-            placeBtn.textContent = 'Placing Order...';
-
-            const timeStr = new Date().toLocaleString('en-IN', {
-                day: '2-digit', month: '2-digit', year: 'numeric',
-                hour: '2-digit', minute: '2-digit', hour12: true
-            });
-
-            const saved = await saveOrderToFirebase({
-                name, phone, email, address, state,
-                items: cartItems.map(item => ({
-                    name: item.name, qty: item.qty, price: item.price, amount: item.amount
-                })),
-                totalItems, totalAmount
-            });
-
-            if (!saved) {
-                alert('Order save aagala. Please try again.');
-                isPlacingOrder = false;
-                placeBtn.disabled = false;
-                placeBtn.textContent = 'Place Order';
-                return;
-            }
-
-            currentOrderId = saved.docId;
-            const orderId = saved.orderId;                    // same ID for Firebase + WhatsApp
-
-            let message = `🧨 *Q Crackers - New Order*\n`;
-            message += `━━━━━━━━━━━━━━━━━━━\n\n`;
-            message += `📋 *Order ID:* ${orderId}\n`;
-            message += `🕐 *Date & Time:* ${timeStr}\n\n`;
-            message += `👤 *Customer Details*\n`;
-            message += `Name: ${name}\n`;
-            if (phone) message += `Phone: ${phone}\n`;
-            if (email) message += `Email: ${email}\n`;
-            if (address) message += `Address: ${address}\n`;
-            message += `State: ${state}\n`;
-            if (selectedPickupBranch) {
-                message += `\n🚚 *Pickup Branch:* ${selectedPickupBranch.name}\n`;
-                message += `📍 ${selectedPickupBranch.address}\n`;
-                if (selectedPickupBranch.phone) message += `📞 ${selectedPickupBranch.phone}\n`;
-            }
-            message += `\n📦 *Order Items*\n`;
-            message += `━━━━━━━━━━━━━━━━━━━\n`;
-            cartItems.forEach((item, index) => {
-                message += `  ${index + 1}. ${item.name}\n`;
-                message += `     Qty: ${item.qty} × ₹${item.price.toLocaleString('en-IN')} = ₹${item.amount.toLocaleString('en-IN')}\n`;
-            });
-            message += `━━━━━━━━━━━━━━━━━━━\n`;
-            message += `*Total Items:* ${totalItems}\n`;
-            message += `*Total Amount:* ₹${totalAmount.toLocaleString('en-IN')}\n\n`;
-            message += `_Thank you for ordering from Q Crackers!_ 🎆`;
-
-            window.open(`https://wa.me/919655586461?text=${encodeURIComponent(message)}`, '_blank');
-
-            document.getElementById('order-summary-modal').classList.remove('active');
-            document.getElementById('cart-modal').classList.remove('active');
-            showOrderSuccess();
-        }
-
-        function showOrderSuccess() {
-            const overlay = document.getElementById('orderSuccessOverlay');
-            if (overlay) {
-                overlay.classList.add('active');
-                document.body.style.overflow = 'hidden';
-                setTimeout(function () {
-                    overlay.classList.remove('active');
-                    document.body.style.overflow = '';
-                    resetCartAfterOrder();
-                    window.location.href = 'index.html';
-                }, 10000);
-            }
-        }
-
-        function resetCartAfterOrder() {
-            if (typeof CartManager !== 'undefined') {
-                CartManager.clearCart();
-            }
-            document.querySelector('.catalog-info')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-
-        async function updateFirestoreWithImageUrls() {
-            try {
-                const productsRef = collection(db, 'products');
-                const snapshot = await getDocs(productsRef);
-                for (const docSnap of snapshot.docs) {
-                    const data = docSnap.data();
-                    if (data.imageUrl && data.imageUrl.startsWith('http')) continue;
-                    if (!data.imageFilename) continue;
-                    try {
-                        const storageRef = ref(storage, data.imageFilename);
-                        const url = await getDownloadURL(storageRef);
-                        await updateDoc(doc(db, 'products', docSnap.id), { imageUrl: url });
-                    } catch (e) { }
+                const snap = await getDoc(doc(db, "storeSettings", "settings"));
+                if (snap.exists() && snap.data().pdfUrl) {
+                    window.open(snap.data().pdfUrl, "_blank");
+                } else {
+                    alert("Price List not available.");
                 }
-                return true;
-            } catch (error) {
-                return false;
+            } catch (err) {
+                console.error(err);
+                alert("Failed to open Price List.");
             }
+        });
+    }
+
+    const upiId = "sskaathimech@okhdfcbank";
+    const receiverName = "Athi Narayanan K";
+
+    window.updateUPILinks = function (totalAmount = 0) {
+        const upiUrl = `upi://pay?pa=${upiId}&pn=${encodeURIComponent(receiverName)}&am=${totalAmount}&cu=INR`;
+        const qrLink = document.getElementById("upiLink");
+        const textLink = document.getElementById("upiTextLink");
+        if (qrLink) qrLink.href = upiUrl;
+        if (textLink) textLink.href = upiUrl;
+    };
+
+    /* ============================================================
+       DOM READY — attach all listeners ONCE
+       ============================================================ */
+    document.addEventListener('DOMContentLoaded', async function () {
+
+        /* ---- Lightbox ---- */
+        const lightboxOverlay = document.getElementById('lightboxOverlay');
+        const lightboxClose = document.getElementById('lightboxClose');
+        const lightboxImage = document.getElementById('lightboxImage');
+
+        if (lightboxClose) lightboxClose.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); closeLightbox(); });
+        if (lightboxOverlay) lightboxOverlay.addEventListener('click', function (e) { if (e.target === lightboxOverlay) closeLightbox(); });
+        if (lightboxImage) lightboxImage.addEventListener('click', function (e) { e.stopPropagation(); });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && lightboxOverlay && lightboxOverlay.classList.contains('active')) closeLightbox();
+        });
+
+        /* ---- Firebase listeners ---- */
+        listenToMinOrderSettings();
+        listenToProducts();
+
+        const loaded = await loadAllStorageImages();
+        if (loaded && !localStorage.getItem('imageBackfillDone')) {
+            await updateFirestoreWithImageUrls();
+            try { localStorage.setItem('imageBackfillDone', '1'); } catch (e) { }
+        }
+        if (allProducts.length > 0) refreshProductImages();
+
+        /* ---- State change → re-evaluate min order ---- */
+        const clientState = document.getElementById('client-state');
+        if (clientState) {
+            clientState.addEventListener('change', function () {
+                updateMinOrderUI();
+            });
         }
 
-        document.addEventListener('DOMContentLoaded', async function () {
-            const lightboxOverlay = document.getElementById('lightboxOverlay');
-            const lightboxClose = document.getElementById('lightboxClose');
-            const lightboxImage = document.getElementById('lightboxImage');
-
-            lightboxClose.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); closeLightbox(); });
-            lightboxOverlay.addEventListener('click', function (e) { if (e.target === lightboxOverlay) closeLightbox(); });
-            lightboxImage.addEventListener('click', function (e) { e.stopPropagation(); });
-            document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && lightboxOverlay.classList.contains('active')) closeLightbox(); });
-
-            listenToProducts();
-
-            const loaded = await loadAllStorageImages();
-            if (loaded && !localStorage.getItem('imageBackfillDone')) {
-                await updateFirestoreWithImageUrls();
-                try { localStorage.setItem('imageBackfillDone', '1'); } catch (e) { }
-            }
-            if (allProducts.length > 0) refreshProductImages();
-
-            document.getElementById('open-cart-btn').addEventListener('click', () => {
+        /* ---- Cart modal open/close ---- */
+        const openCartBtn = document.getElementById('open-cart-btn');
+        if (openCartBtn) {
+            openCartBtn.addEventListener('click', () => {
                 document.getElementById('cart-modal').classList.add('active');
                 renderCartModal();
             });
+        }
 
-            document.getElementById('cart-modal-close').addEventListener('click', () => document.getElementById('cart-modal').classList.remove('active'));
-            document.getElementById('cart-continue-btn').addEventListener('click', () => document.getElementById('cart-modal').classList.remove('active'));
+        const cartModalClose = document.getElementById('cart-modal-close');
+        if (cartModalClose) cartModalClose.addEventListener('click', () => document.getElementById('cart-modal').classList.remove('active'));
 
-            document.getElementById('cart-checkout-btn').addEventListener('click', () => {
+        const cartContinueBtn = document.getElementById('cart-continue-btn');
+        if (cartContinueBtn) cartContinueBtn.addEventListener('click', () => document.getElementById('cart-modal').classList.remove('active'));
+
+        /* ---- Checkout ---- */
+        const checkoutBtn = document.getElementById('cart-checkout-btn');
+        if (checkoutBtn) {
+            checkoutBtn.addEventListener('click', () => {
                 const { totalItems, totalAmount } = collectCartItems();
+                const minOrder = getMinOrder();
                 if (totalItems === 0) { alert('Cart empty.'); return; }
-                if (totalAmount < 2500) {
-                    alert(`Minimum order is ₹2500. Current total: ₹${totalAmount.toLocaleString('en-IN')}`);
+                if (totalAmount < minOrder) {
+                    alert(`Minimum order is ₹${minOrder.toLocaleString('en-IN')}. Current total: ₹${totalAmount.toLocaleString('en-IN')}`);
                     return;
                 }
                 document.getElementById('cart-modal').classList.remove('active');
@@ -5663,14 +5741,27 @@
                 document.getElementById('os-order-date').textContent = new Date().toLocaleDateString('en-GB');
                 renderOrderSummaryModal();
             });
+        }
 
-            document.getElementById('order-summary-close').addEventListener('click', () => document.getElementById('order-summary-modal').classList.remove('active'));
-            document.getElementById('cart-download-bill').addEventListener('click', downloadBill);
-            document.getElementById('cart-send-whatsapp').addEventListener('click', sendToWhatsApp);
+        /* ---- Order summary modal buttons (attach ONCE) ---- */
+        const orderSummaryClose = document.getElementById('order-summary-close');
+        if (orderSummaryClose) {
+            orderSummaryClose.addEventListener('click', () =>
+                document.getElementById('order-summary-modal').classList.remove('active'));
+        }
 
-            document.getElementById('submit-enquiry').addEventListener('click', function () {
+        const downloadBillBtn = document.getElementById('cart-download-bill');
+        if (downloadBillBtn) downloadBillBtn.addEventListener('click', downloadBill);
+
+        const sendWaBtn = document.getElementById('cart-send-whatsapp');
+        if (sendWaBtn) sendWaBtn.addEventListener('click', sendToWhatsApp);
+
+        /* ---- Bottom Submit button (attach ONCE) ---- */
+        const submitEnquiryBtn = document.getElementById('submit-enquiry');
+        if (submitEnquiryBtn) {
+            submitEnquiryBtn.addEventListener('click', function () {
                 const { totalItems, totalAmount } = collectCartItems();
-                const minOrder = 2500;
+                const minOrder = getMinOrder();
                 if (totalItems === 0) { alert('Please add items to your cart.'); return; }
                 if (totalAmount < minOrder) {
                     alert(`Minimum order amount is ₹${minOrder.toLocaleString('en-IN')}. Your current total is ₹${totalAmount.toLocaleString('en-IN')}. Please add more items.`);
@@ -5680,8 +5771,9 @@
                 document.getElementById('os-order-date').textContent = new Date().toLocaleDateString('en-GB');
                 renderOrderSummaryModal();
             });
-        });
+        }
 
+        /* ---- Back to top ---- */
         const backToTopBtn = document.getElementById('back-to-top');
         if (backToTopBtn) {
             window.addEventListener('scroll', function () {
@@ -5693,6 +5785,7 @@
             });
         }
 
+        /* ---- All categories dropdown ---- */
         const allCatBtn = document.getElementById('all-cat-btn');
         const allCatMenu = document.getElementById('all-cat-menu');
         if (allCatBtn && allCatMenu) {
@@ -5709,6 +5802,7 @@
             });
         }
 
+        /* ---- Hamburger menu ---- */
         const hamburger = document.querySelector('.hamburger');
         const mainNav = document.querySelector('.main-nav');
         if (hamburger && mainNav) {
@@ -5724,71 +5818,10 @@
                 }
             });
         }
-    </script>
+    });
+</script>
 
-    <script type="module">
-        import { initializeApp, getApps, getApp } from "firebase/app";
-        import { getFirestore, doc, getDoc } from "firebase/firestore";
-
-        /* Reuse existing Firebase app */
-        const firebaseConfig = {
-            apiKey: "AIzaSyAJo1hyj4nDX890w5dTtlFoMMa5fnY_c-0",
-            authDomain: "qcrackers.firebaseapp.com",
-            projectId: "qcrackers",
-            storageBucket: "qcrackers.firebasestorage.app",
-            messagingSenderId: "491899224672",
-            appId: "1:491899224672:web:acc45f1e3cb5f4af1bb905"
-        };
-
-        const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-
-        /* ===========================
-           PRICE LIST BUTTON
-        =========================== */
-
-        const priceListBtn = document.getElementById("priceListBtn");
-
-        if (priceListBtn) {
-            priceListBtn.addEventListener("click", async (e) => {
-                e.preventDefault();
-
-                try {
-                    const snap = await getDoc(doc(db, "storeSettings", "settings"));
-
-                    if (snap.exists() && snap.data().pdfUrl) {
-                        window.open(snap.data().pdfUrl, "_blank");
-                    } else {
-                        alert("Price List not available.");
-                    }
-
-                } catch (err) {
-                    console.error(err);
-                    alert("Failed to open Price List.");
-                }
-            });
-        }
-
-        /* ===========================
-           UPI PAYMENT LINK
-        =========================== */
-
-        const upiId = "sskaathimech@okhdfcbank";
-        const receiverName = "Athi Narayanan K";
-
-        window.updateUPILinks = function (totalAmount = 0) {
-
-            const upiUrl =
-                `upi://pay?pa=${upiId}&pn=${encodeURIComponent(receiverName)}&am=${totalAmount}&cu=INR`;
-
-            const qrLink = document.getElementById("upiLink");
-            const textLink = document.getElementById("upiTextLink");
-
-            if (qrLink) qrLink.href = upiUrl;
-            if (textLink) textLink.href = upiUrl;
-        };
-    </script>
-    <script src="cart.js"></script>
+<script src="cart.js"></script>
 </body>
 
 </html>
